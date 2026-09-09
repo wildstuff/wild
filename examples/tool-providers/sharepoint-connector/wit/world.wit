@@ -1,0 +1,31 @@
+// `sharepoint-connector` — ADR-0141 PR1 existence proof.
+//
+// A single third-party plugin that exercises all four installable compute
+// primitives defined in ADR-0141:
+//
+//   - tool-provider  → `wild:tool-provider/tools` (read tools)
+//   - worker         → `wild:worker/handler` + `wild:worker/meta`
+//   - effect-handler → `wild:tool-provider/tools` tools tagged via the
+//                      sidecar `effect.sharepoint` capability bundle
+//   - function-backing → `wild:function/backing`
+//
+// Imports are deliberately minimal: secrets for credentials, raw wasi:http
+// for outbound calls, and wild:messaging/consumer so the worker can publish
+// results.
+
+package wildstuff:sharepoint-connector@0.1.0;
+
+world sharepoint-connector {
+    include wild:plugin-meta/plugin-base@0.3.0;
+
+    // ── Outbound capabilities ──
+    import wild:secrets/store@0.1.0;
+    import wasi:http/outgoing-handler@0.2.0;
+    import wild:messaging/consumer@0.3.0;
+
+    // ── Compute primitives ──
+    export wild:tool-provider/tools@0.4.0;
+    export wild:worker/handler@0.1.0;
+    export wild:worker/meta@0.1.0;
+    export wild:function/backing@0.1.0;
+}

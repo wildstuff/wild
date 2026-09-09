@@ -1,0 +1,25 @@
+// `cash-forecast` — ADR-0202 D5, the dogfood Procedure.
+//
+// A seasonal cash-inflow forecast, exported through the ADR-0082 Function
+// seam (`wild:function/backing`) so a declared field can name it with
+// `backed_by: cash_forecast`, and through `wild:tool-provider/tools` so an
+// operator can ask it directly.
+//
+// **The import list is the point.** A fitted model carries its parameters,
+// so it reads no clock, opens no socket and touches no lake. That is what
+// keeps it inside the ADR-0202 D10.3 determinism profile: re-running v3 over
+// the same inputs has to yield the same number, or the audit trail is a
+// story rather than a record. The Rust standard library still links
+// `wasi:io`, the `wasi:cli` stdio surface, `wasi:clocks/monotonic-clock` and
+// `wasi:random/insecure-seed` into every component — those are the measured
+// floor the profile admits, and nothing here reaches past it.
+
+package wildstuff:cash-forecast@0.1.0;
+
+world cash-forecast {
+    include wild:plugin-meta/plugin-base@0.3.0;
+
+    // ── Compute primitives ──
+    export wild:tool-provider/tools@0.4.0;
+    export wild:function/backing@0.1.0;
+}

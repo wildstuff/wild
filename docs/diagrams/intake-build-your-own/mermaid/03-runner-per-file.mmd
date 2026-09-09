@@ -1,0 +1,10 @@
+flowchart TD
+    Enum["enumerate the source"] --> Loop{"for each file"}
+    Loop --> Fetch["fetch → blob"]
+    Fetch --> Sample["sample → columns"]
+    Sample --> FP["fingerprint(columns)"]
+    FP --> Known{"shape in<br/>registry?"}
+    Known -->|"yes"| Decode["decode in chunks<br/>→ map rows → ingest"]
+    Known -->|"no"| Park["park the file<br/>+ escalate to Chief"]
+    Decode --> Done([" done · idempotent "])
+    Park --> Ask([" Chief maps it once<br/>→ back to step 3 "])

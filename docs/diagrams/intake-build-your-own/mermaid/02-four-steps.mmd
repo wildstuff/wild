@@ -1,0 +1,7 @@
+flowchart TD
+    S1["1 · Source connector<br/>enumerate + fetch → wild:blobs"]
+    S2["2 · Format adapter<br/>sample + decode → raw rows"]
+    S3["3 · Intake config<br/>Chief maps one sample → fields"]
+    S4["4 · Dispatch a run<br/>Runner streams every file"]
+    S1 --> S2 --> S3 --> S4
+    S4 -. "new shape appears" .-> S3

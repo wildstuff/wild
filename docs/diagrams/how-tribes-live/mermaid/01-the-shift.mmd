@@ -1,0 +1,12 @@
+flowchart LR
+    subgraph frozen["Ordinary software"]
+        direction TB
+        A1["You write a spec"] --> A2["Ship it"] --> A3["It drifts<br/>from the world"]
+    end
+    subgraph living["A Wild Tribe"]
+        direction TB
+        B1["You describe<br/>a challenge"] --> B2["A Tribe owns it"]
+        B2 --> B3["Works · Learns ·<br/>Stores · Evolves"]
+        B3 --> B2
+    end
+    frozen -.->|"the flip"| living

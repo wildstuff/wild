@@ -1,0 +1,18 @@
+{
+  "name": "slugify",
+  "version": "0.1.2",
+  "tools": [
+    "slugify"
+  ],
+  "flavor": "tool-provider",
+  "wit_baseline": "wild:tool-provider@0.4.0",
+  "artifact": {
+    "digest": "sha256:f8329bf0ade6a26b97d2d770c802f039948a56c43b23c091106ee1b9e98b580c",
+    "built_in": {
+      "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+      "target": "wasm32-wasip2",
+      "toolchain_reference": "ghcr.io/wildstuff/forge-sandbox:0.3.0",
+      "toolchain_digest": "sha256:d50f1f5d91de9e00a892eb458d3090de286f9c1a7a3a4cd388bcc682fefffeba"
+    }
+  }
+}

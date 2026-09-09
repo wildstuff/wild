@@ -1,0 +1,21 @@
+# ADR-0156 PR2 — the DOMAIN PACKAGE MANIFEST (the frozen V1 schema; parsed by
+# `wild_tribe_ops::domain_package::DomainPackageManifest`). A package is a
+# bundle of DECLARATIONS — never code, never a connector, never a credential
+# (D1); this file names the bundle, everything else IS the tribe-shaped
+# payload beside it (`ontology/model.yaml`, `apps/*.yaml`).
+
+name: contract-management-de
+version: 0.1.0
+publisher: wildstuff-examples
+description: >-
+  Vertragsverwaltung — a running-contract portfolio (contracts, partners,
+  notice periods, annual fees) with a full German reading and a default
+  end-user cockpit. Ships UNBOUND sample sources: connect your own folder or
+  system after install (the adaptation walk guides you).
+# The package's primary reading locale (ADR-0155: one primary locale per
+# tribe; additional locales are an open axis).
+primary_locale: de
+# Runtime capabilities the payload NEEDS (the ADR-0157 D4.4 `requires`
+# marker, generalized): a daemon lacking one refuses the install legibly
+# instead of degrading silently. This package needs none beyond the base.
+requires: []

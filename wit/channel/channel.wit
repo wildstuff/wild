@@ -1,0 +1,141 @@
+// `wild:channel` — the two directions of a customer-facing Channel, as two
+// interfaces in ONE package (ADR-0062 "a channel is a bidirectional transport"):
+//
+//   - `inbound`  (ADR-0159 D1b): the pluggable typed PARSER — verified webhook
+//                bytes → canonical `inbound-message`s.
+//   - `outbound` (ADR-0160 delivery): the SENDER — a reply → the provider API.
+//
+// A bidirectional channel (whapi, Telegram) exports BOTH interfaces from one
+// plugin, same slug; a pure parser exports only `inbound`; a send-only sink
+// only `outbound`. The two mirror each other: `inbound.chat-id` is the
+// correlation key the host stamps a principal from, and `outbound.recipient`
+// is that same address recovered from the stamped principal on the way back.
+//
+// Direction (same as `wild:operator-channel`, INVERSE to `wild:data`): the
+// GUEST is the PROVIDER (it `export`s the interface); the HOST is the CONSUMER
+// (it calls `parse-inbound` / `send`). This mirrors `wild:tool-provider`, NOT
+// `wild:data`. Each direction gets its own host-tree world (`channel-inbound-host`
+// exports `inbound`, `channel-outbound-host` exports `outbound`).
+//
+// Why still SEPARATE from `wild:operator-channel`: audience, not direction.
+// operator-channel is OPERATOR-facing — a `notification` carries severity,
+// kind, and pickable actions the Elder fans out per ELDER.md routing. A
+// customer reply is a plain conversational turn to one recipient; conflating
+// them would couple the operator-notification schema to customer chat.
+//
+// The forgeable/host split (ADR-0159 D1b) is asymmetric: `parse-inbound` is a
+// PURE function of the request body (asserts no identity, reads no secret,
+// opens no socket) — the ADR-0012 §6 `inbound-parser` flavor grants it an
+// EMPTY import set. `send` is NOT pure: it calls the provider API, so an
+// outbound plugin imports `wild:http` + `wild:secrets` (like `telegram-channel`
+// under operator-channel) — a Tier-2 hand-built plugin, not the empty-import
+// forge flavor. The irreducibly host-only work (verify the provider secret,
+// stamp the `(channel, chat-id) → principal` correlation, fork, publish; and on
+// the way out, resolve the channel binding + drain the reply subject) never
+// enters the guest.
+//
+// This package stays import-free so the host-tree copy is a clean symlink,
+// not a trimmed mirror. A guest's composed world (which pulls in
+// `wild:plugin-meta`) lives in the PLUGIN's own `wit/world.wit`.
+
+package wild:channel@0.1.0;
+
+interface inbound {
+    /// One parsed inbound turn, normalized across providers. Mirrors the host
+    /// `InboundMessage` field-set (ADR-0159 D8). NONE of these fields is
+    /// trusted as a claimed identity — `chat-id` is a correlation key the host
+    /// re-resolves against its per-channel `(channel, chat-id) → principal`
+    /// store and stamps itself.
+    record inbound-message {
+        /// The `{provider}` token the message arrived on (e.g. `"whapi"`).
+        provider: string,
+        /// The channel slug used for binding lookup. Absent a per-tribe
+        /// binding table at parse time, the parser sets this to the provider
+        /// token; the host resolves the real bound channel slug downstream.
+        channel: string,
+        /// Sender identity WITHIN the channel (whapi `chat_id`, falling back
+        /// to `from`) — the host's principal-correlation key. A correlation
+        /// key, never a trusted claim.
+        chat-id: string,
+        /// The provider's own message id — the host's dedup key.
+        provider-message-id: string,
+        /// The quoted/replied-to message id, when the inbound quotes another
+        /// message (whapi `context.quoted_id`) — reply-threading correlation.
+        quoted-message-id: option<string>,
+        /// `true` when the provider marks this as the tribe's own outbound
+        /// (takeover/echo distinction).
+        from-me: bool,
+        /// The message text body (empty for a non-text payload not extracted).
+        text: string,
+        /// Provider-supplied unix timestamp (seconds), when present.
+        timestamp: option<s64>,
+    }
+
+    /// Why a parse failed. The host maps this to an HTTP status: a malformed
+    /// body is a `400` (the caller sent garbage), an internal parser fault is
+    /// a `500` (the parser itself broke). Signature/secret verification is
+    /// NOT here — that is the host's job, run BEFORE the body ever reaches the
+    /// guest, so a `parse-inbound` call only ever sees an authenticated body.
+    variant parse-error {
+        /// The body did not match the provider's expected shape.
+        malformed(string),
+        /// The parser hit an internal fault normalizing the payload.
+        internal(string),
+    }
+
+    /// Parse an ALREADY-VERIFIED request body into zero or more canonical
+    /// messages. A single webhook POST can carry several messages, so the
+    /// result is a list. Pure: same bytes in, same messages out; no I/O, no
+    /// identity assertion.
+    parse-inbound: func(raw: list<u8>) -> result<list<inbound-message>, parse-error>;
+}
+
+interface outbound {
+    /// One reply to send back out over a channel. The host drains this off the
+    /// customer RESPONSE subject and hands it to the bound channel plugin, which
+    /// renders + delivers it via the provider API.
+    record outbound-message {
+        /// The bound channel slug this reply routes through (e.g. `"whapi"`) —
+        /// the key the host looks the plugin up by.
+        channel: string,
+        /// The recipient's address WITHIN the channel — the customer's chat-id,
+        /// the SAME correlation key `inbound.chat-id` surfaced, recovered by the
+        /// host from the stamped principal. The plugin uses it verbatim as the
+        /// provider send target; it is not a trusted claim the guest invents.
+        recipient: string,
+        /// The reply body (Markdown source; the channel renders to its native
+        /// format — Telegram MarkdownV2, plain-text SMS, …).
+        text: string,
+        /// The provider-message-id this reply threads onto, when replying to a
+        /// specific inbound message (whapi quote/reply). Absent = a fresh send.
+        reply-to: option<string>,
+    }
+
+    /// Returned on a successful send. `provider-message-id` back-correlates the
+    /// sent message for dedup / threading, when the provider returns one.
+    record send-receipt {
+        /// Epoch milliseconds (WIT has no timestamp type; ms is the daemon-wide
+        /// convention).
+        sent-at: u64,
+        provider-message-id: option<string>,
+    }
+
+    /// Why a send failed. The host's drain reacts differently: retry-later on
+    /// `unavailable`, give up on `permanent`, back off `n` seconds on
+    /// `rate-limited`.
+    variant send-error {
+        unavailable(string),
+        permanent(string),
+        rate-limited(u32),
+    }
+
+    /// Send one reply out over the channel. `config` is the channel's private
+    /// binding for THIS reply's `(channel, tribe)` — the host resolves it from
+    /// `system/channels.yaml` per send (a live operator edit takes effect with
+    /// no restart) and passes the matching entry's `config` map as key→value
+    /// pairs. The plugin reads its OWN keys (api base, sender defaults); secrets
+    /// stay `wild:secrets` aliases named here, never values. Empty when the
+    /// tribe has no binding for this channel — the plugin then reports a skip,
+    /// never a wrong send.
+    send: func(msg: outbound-message, config: list<tuple<string, string>>) -> result<send-receipt, send-error>;
+}

@@ -1,0 +1,10 @@
+{
+  "tool": "slugify",
+  "input": {
+    "text": "Hello World"
+  },
+  "expected": {
+    "slug": "hello-world"
+  },
+  "match": "exact"
+}
