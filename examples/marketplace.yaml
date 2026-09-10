@@ -1,0 +1,92 @@
+# Example operator-curated marketplace catalog (ADR-0142 D2b + D20).
+#
+# This is DOCUMENTATION, not a runtime input. A FRESH profile is already born
+# with the first-party entries below (`wild_shared::marketplace_seed` seeds
+# `marketplace.yaml` + `connectors/` if absent — canonical seed:
+# `assets/marketplace/first-party.yaml`). To offer MORE, edit your profile's
+# copy; to start from this teaching copy instead, copy it to your profile root:
+#
+#     cp examples/marketplace.yaml <profile_root>/marketplace.yaml
+#
+# A missing file is an empty catalog (no installable hits) — the documented
+# profile pattern. Editing the file reseeds on the next search (no restart).
+#
+# The catalog is KIND-GENERIC (D20): it offers connectors AND workers. The older
+# filename `connectors.yaml` and the older `connectors:` root key are still read
+# and MERGED with this one, so an existing profile keeps working and can adopt
+# the new file gradually.
+#
+# `kind` is an OPEN token (ADR-0093 §3) — a publisher may ship a kind we have
+# never heard of. What the host DOES per kind is the closed part: the INSTALL is
+# kind-agnostic, only the post-install steps differ (`OfferShape`). A connector
+# ends at `onboard_source`; a WORKER is installed and still INERT until it is a
+# deployable component type, sits in a tribe's roster, and has a trigger.
+#
+# Each entry becomes ONE wild-wide `reach: installable` capability node. `summary` is the plain-language text `tool_search` ranks on
+# and shows verbatim; the remaining keys form the inline `install` handle — the
+# settings surface the `install_connector` offer-to-install flow renders
+# ("SharePoint needs: a client secret, the `sharepoint` OAuth sign-in").
+# Discovery is a suggestion; the install is the governed follow-up (ADR-0142
+# Q7 — `install_connector` with an explicit operator confirm), never automatic.
+#
+# `sidecar_ref` (ADR-0142 Land-3) points at the connector's PUBLISHED sidecar —
+# the WIT contract (`provides` / `requires` / `kind`) a governed install reads to
+# build the plugin manifest. It is deliberately NOT inlined here: a marketplace
+# curator shouldn't hand-transcribe a plugin's interface set. An entry WITHOUT a
+# `sidecar_ref` is discoverable but not-yet-installable (a suggestion only).
+#
+# Two forms (ADR-0142 D19 — the resolution axis is closed):
+#
+#   sidecar_ref: "connectors/sharepoint.sidecar.json"   # a FILE — absolute, or
+#       relative to the profile root where THIS file lives. The local-dev and
+#       ships-with-the-profile case (what the entries below use).
+#
+#   sidecar_ref: "oci://ghcr.io/wildstuff/plugins/sharepoint-connector:0.1.0-sidecar"
+#       an OCI ARTIFACT (ADR-0142 D18) — the contract published beside the
+#       component at its `<tag>-sidecar` sibling tag. The catalog then describes
+#       a connector whose files it does not ship. The published contract also
+#       PINS the component's manifest digest, so the install pulls exactly the
+#       bytes the contract describes, not whatever the tag resolves to today.
+#
+# Note what a published sidecar deliberately does NOT carry: a trust claim. A
+# publisher does not get to grade itself — the tier is the operator's confirmed
+# one (below), until a verified signature replaces that judgement (ADR-0153).
+
+offerings:
+  - name: sharepoint
+    kind: connector
+    summary: "Connect Microsoft SharePoint / Office 365 (OneDrive, lists, sites) via Microsoft Graph."
+    oci_ref: "oci://ghcr.io/wildstuff/plugins/sharepoint-connector:0.1.0"
+    trust_tier: community            # verified | community | unknown (ADR-0084 trust gate)
+    config_keys: []                  # tenant + site ride in source_ref, not config_keys (see sidecar)
+    secret_aliases:
+      - sharepoint-client-secret     # operator: `wild secret add sharepoint-client-secret`
+    auth_bindings:
+      - sharepoint                   # egress OAuth binding (ADR-0143); wire in system/oauth.yaml + system/egress.yaml
+    sidecar_ref: "connectors/sharepoint.sidecar.json"   # published WIT contract (copy examples/connectors/ into the profile root)
+
+  - name: m365-mail
+    kind: connector
+    summary: "Connect a Microsoft 365 mailbox (invoices, receipts by email) via Microsoft Graph — a shared inbox (admin-consented) or your own (sign-in)."
+    oci_ref: "oci://ghcr.io/wildstuff/plugins/m365-mail-connector:0.1.0"
+    trust_tier: community            # verified | community | unknown (ADR-0084 trust gate)
+    config_keys: []                  # mailbox + folder ride in source_ref, not config_keys (see sidecar)
+    secret_aliases:
+      - m365-mail-client-secret      # operator: `wild secret add m365-mail-client-secret`
+    auth_bindings:
+      - m365-mail                    # egress OAuth binding (ADR-0143); wire in system/oauth.yaml + system/egress.yaml
+    sidecar_ref: "connectors/m365-mail.sidecar.json"   # published WIT contract (copy examples/connectors/ into the profile root)
+
+  # A WORKER offering (D21). Same install, different tail: this one does not
+  # bring data in — it acts on data that is already there, so after the install
+  # it needs a component type, a tribe roster entry, and a trigger before it
+  # ever runs. `install_offering` says so; it does not report "done".
+  - name: invoice-auditor
+    kind: worker                     # open token; `workload` (the sidecar's spelling) also maps to a worker
+    summary: "Audits incoming invoices against the ledger and flags duplicates, wrong VAT, and amounts that do not match the purchase order."
+    oci_ref: "oci://ghcr.io/example/invoice-auditor:0.1.0"
+    trust_tier: community
+    config_keys: []
+    secret_aliases: []
+    auth_bindings: []
+    sidecar_ref: "oci://ghcr.io/example/invoice-auditor:0.1.0-sidecar"

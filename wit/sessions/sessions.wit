@@ -1,0 +1,119 @@
+// WILD Sessions Interface — conversational layer.
+//
+// Sessions are the stable conversational unit; messages belong to
+// sessions.
+//
+// Caller-org discipline: every write is implicitly scoped to the
+// caller's tribe (the same rule wild:events and wild:decisions
+// enforce). Cross-org session access is not supported (sessions
+// are private).
+
+package wild:sessions@0.3.0;
+
+interface store {
+
+    // ── Sessions ─────────────────────────────────────────────────────
+
+    record session-info {
+        session-id:      string,
+        tribe-id:     string,
+        participant-id:  string,
+        channel:         string,
+        title:           option<string>,
+        opened-at:       string,           // RFC-3339
+        last-message-at: string,
+        status:          string,           // active | archived | closed
+    }
+
+    /// Open a fresh session. Returns the new session-id. Caller is
+    /// expected to also publish `wild.{tribe}.session.opened` for live
+    /// subscribers; the storage adapter does NOT publish on its own.
+    open: func(
+        tribe-id:    string,
+        participant-id: string,
+        channel:        string,
+    ) -> result<string, string>;
+
+    /// Resume the most recent active session for (tribe,
+    /// participant) or open a fresh one. The default entrypoint —
+    /// callers that want strict resume behaviour use `find-active`
+    /// first.
+    open-or-resume: func(
+        tribe-id:    string,
+        participant-id: string,
+        channel:        string,
+    ) -> result<session-info, string>;
+
+    /// Most recent active session for (tribe, participant), or
+    /// `none` if no active session exists.
+    find-active: func(
+        tribe-id:    string,
+        participant-id: string,
+    ) -> result<option<session-info>, string>;
+
+    /// Look up a session by id.
+    get-session: func(session-id: string) -> result<option<session-info>, string>;
+
+    /// Set / clear the auto-generated session title. Empty string
+    /// resets to None. Idempotent — overwriting is allowed for
+    /// re-titling on topic drift.
+    update-title: func(session-id: string, title: string) -> result<_, string>;
+
+    /// Close a session. Subsequent appends fail. Title is frozen.
+    close: func(session-id: string) -> result<_, string>;
+
+    // ── Messages ─────────────────────────────────────────────────────
+
+    record new-message {
+        session-id:        string,
+        parent-message-id: option<string>,
+        role:              string,            // user | assistant | tool | system
+        content-md:        string,
+        content-json:      option<string>,
+        worker-name:       option<string>,
+        model:             option<string>,
+        tokens-in:         option<u32>,
+        tokens-out:        option<u32>,
+        cost-usd:          option<f64>,
+        trigger-kind:      option<string>,
+        metadata-json:     option<string>,
+    }
+
+    record message-info {
+        message-id:        string,
+        session-id:        string,
+        parent-message-id: option<string>,
+        role:              string,
+        content-md:        string,
+        content-json:      option<string>,
+        created-at:        string,
+        worker-name:       option<string>,
+        model:             option<string>,
+        tokens-in:         option<u32>,
+        tokens-out:        option<u32>,
+        cost-usd:          option<f64>,
+        trigger-kind:      option<string>,
+        status:            string,
+        /// ADR-0165 — opaque per-message metadata persisted by the host
+        /// and returned on recall. Used by the chief to recover the
+        /// session's privacy ceiling across turns.
+        metadata-json:     option<string>,
+    }
+
+    /// Append a message. Returns the new message-id. Bumps the
+    /// session's `last-message-at`. Caller is expected to publish
+    /// `wild.{tribe}.session.message` for live subscribers.
+    append: func(msg: new-message) -> result<string, string>;
+
+    /// Load the last `limit` messages of a session, oldest first.
+    /// Cheap (single index seek) — orchestrator calls this every
+    /// cycle to build the chat-history portion of the prompt.
+    /// Compaction-resume: when a cycle on this session compacted its
+    /// context, the newest summary is PREPENDED as one synthetic
+    /// host-stamped `system` message — so the result may carry
+    /// `limit + 1` entries (prompt-side context, not stored history).
+    recall: func(
+        session-id: string,
+        limit:      u32,
+    ) -> result<list<message-info>, string>;
+}

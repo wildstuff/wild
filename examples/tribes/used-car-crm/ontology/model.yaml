@@ -1,0 +1,515 @@
+# ADR-0108 — the DDD authoring source (`DomainModelDoc`) for the used-car-crm
+# tribe: a USED-CAR DEALERSHIP CRM. THE CONSTITUTION of this tribe.
+#
+# Distilled from a production system (a German dealer, ~700 vehicles): the
+# inventory is synced from a mobile.de export every 30 minutes, customers ask
+# about vehicles over WhatsApp, viewings are scheduled, and every price
+# negotiation goes to the owner — the agent never decides a discount.
+#
+# This model is also the REFERENCE ANSWER for the goal-statement walk (see
+# `specs/goal-statement.md`): what a good Elder-built tribe for this concept
+# looks like. Three lanes of the concept live OUTSIDE the model on purpose:
+#   - the WhatsApp channel is bound at deploy time (ADR-0167 operator
+#     onboarding — `wild channel bind`), never authored into the ontology;
+#   - the customer conversation agent is the ADR-0160 runtime feature;
+#   - the LIVE mobile.de Seller-API binding is a forged connector (ADR-0159)
+#     that swaps this model's folder `locator` — the model itself is stable.
+context: dealership
+
+# ADR-0236 — what this tribe is FOR, and what it deliberately is not. The
+# non-goals are the distilled production guard rules: each one is checked
+# against what this model actually declares.
+charter:
+  purpose: >
+    Wir beantworten Anfragen zu unseren Fahrzeugen ehrlich und schnell, halten
+    den Bestand mit mobile.de im Takt, vereinbaren Besichtigungstermine und
+    halten jeden Interessenten im Blick — damit kein Lead verloren geht und der
+    Inhaber jede Preisentscheidung selbst trifft.
+  non_goals:
+    - Wir machen keine Preiszusagen. Jedes Preisangebot eines Kunden wird als
+      Vorgang erfasst und geht an den Inhaber; erst seine Entscheidung wird ein
+      Abschluss.
+    - Der interne Mindestpreis ist kein Verhandlungsargument. Er wird Kunden
+      gegenüber nie genannt und taucht auf keiner Kundenoberfläche auf.
+    - Wir erfinden keine Fahrzeugdaten. Was nicht im gespiegelten Bestand
+      steht, sagen wir ehrlich nicht zu.
+    - Wir verkaufen nicht selbst. Kaufvertrag, Probefahrt und Übergabe macht
+      ein Mensch vor Ort; wir terminieren und protokollieren nur.
+    - Wir verschicken keine unaufgeforderte Werbung. Wir antworten, wenn
+      Kunden uns schreiben.
+
+# ── The money lexicon ────────────────────────────────────────────────────
+value_objects:
+  - name: money_eur
+    base: decimal
+    unit: EUR
+    # EUR minor unit: conforming fields round to 2 fractional digits in the fold.
+    scale: 2
+    description: A monetary amount in EUR
+    openness: open
+
+# ── The closed domain sets ───────────────────────────────────────────────
+# Tribe-owned taxonomies only. Deliberately NOT enumerated: everything the
+# mobile.de feed delivers (fuel, gearbox, listing status) — a third party
+# extends those axes, so they stay open text tokens (ADR-0093 §3).
+value_sets:
+  - name: contact_channel
+    values: [whatsapp, mobile_de, phone, walk_in]
+    openness: closed
+    rationale: The dealership's contact surfaces are a modelling decision; a new channel is a modelling change.
+  - name: viewing_status
+    values: [requested, confirmed, completed, cancelled, no_show]
+    openness: closed
+    rationale: The viewing lifecycle is tribe-owned; a new stage is a modelling change.
+  - name: lead_status
+    values: [new, active, won, lost]
+    openness: closed
+    rationale: The lead funnel stages are a modelling decision, deliberately coarse.
+
+aggregates:
+  # ── INVENTORY: the mirrored vehicle stock ──────────────────────────────
+  # Mirrored from the mobile.de export by the `mobile-de-inventory` source —
+  # never hand-edited. The feed's own axes (fuel, gearbox, status) stay open
+  # text: mobile.de extends them, this model does not.
+  - name: vehicle
+    context: inventory
+    display_name: Vehicle
+    plural: Vehicles
+    description: >-
+      One vehicle on the lot as mobile.de knows it — mirrored from the export
+      every 30 minutes. The asking price is public; the dealer's own price
+      floor lives on `pricing_floor`, deliberately a separate record.
+    title_key: vehicle_id
+    icon: "🚗"
+    color: "#1f6feb"
+    category: Inventory
+    customer_visible: true
+    identity:
+      key: [vehicle_id]
+    mirror:
+      - { name: vehicle_id, type: text, required: true, label: "Ad no.", description: The mobile.de ad id — the sync key }
+      - { name: make, type: text, required: true, searchable: true, label: Make }
+      - { name: model_name, type: text, required: true, searchable: true, label: Model }
+      - { name: first_registration, type: text, label: First registration, description: "As the export delivers it (e.g. 2021-03)" }
+      - { name: mileage_km, type: integer, label: Mileage (km) }
+      - { name: price_eur, type: decimal, vo: money_eur, role: asks, format: "currency:EUR", salience: summary, label: Asking price, description: The public asking price from the listing }
+      - { name: fuel, type: text, label: Fuel, description: "Open feed token (petrol, diesel, electric, …) — mobile.de's axis, not ours" }
+      - { name: gearbox, type: text, label: Gearbox, description: Open feed token — mobile.de's axis, not ours }
+      - { name: color, type: text, label: Color }
+      - { name: status, type: text, label: Listing status, description: "Open feed token (available, reserved, sold) — the listing's own state" }
+      - { name: listed_on, type: date, label: Listed on, description: The day the listing went live — anchors days_on_lot }
+    # Read-time (aging): computes on READ at the query's date, never stored.
+    derived:
+      - { name: days_on_lot, type: integer, expr: "as_of() - listed_on", description: "Days since the listing went live, as of the query date. Read-time; never stored." }
+
+  # ── INVENTORY: the dealer's own price floor ────────────────────────────
+  # Deliberately NOT a field on `vehicle`: the mirror stays pure feed shape,
+  # and the floor is the dealer's OWN, sensitive datum — the production system's
+  # hardest rule ("never reveal min price") becomes a structural separation
+  # plus a `sensitive` mark, not a prompt instruction.
+  - name: pricing_floor
+    context: inventory
+    display_name: Price Floor
+    plural: Price Floors
+    description: >-
+      The dealer's internal minimum price for one vehicle — the line under
+      which every offer must go to the owner. Internal by construction; never
+      customer-visible, never quoted in chat.
+    title_key: vehicle_id
+    icon: "🔒"
+    color: "#d29922"
+    category: Inventory
+    customer_visible: false
+    identity:
+      key: [vehicle_id]
+    state:
+      - { name: vehicle_id, type: text, required: true, label: Vehicle, description: The vehicle this floor belongs to }
+      - { name: min_price_eur, type: decimal, required: true, vo: money_eur, role: floors, sensitive: true, format: "currency:EUR", label: Minimum price, description: "The dealer's floor — sensitive: masked on customer surfaces, never a negotiation argument" }
+      - { name: note, type: text, sensitive: true, label: Note, description: "Why this floor (purchase cost, repairs, …) — the owner's working note" }
+    relations:
+      - name: floors
+        target: vehicle
+        via_field: vehicle_id
+        inverse_name: floored_by
+        enforced: true
+        description: The vehicle this price floor constrains
+    commands:
+      - name: set_price_floor
+        # ADR-0155 — the authored button text every surface renders.
+        label: Set the price floor
+        description: >-
+          Set (or move) the internal minimum price for a vehicle. Owner's
+          call — the floor is what routes offers to the inbox, so keep it
+          current when purchase costs change.
+        risk: low
+        inputs:
+          - vehicle_id
+          - min_price_eur
+          - { name: note, required: false }
+        requires:
+          min_price_eur: "> 0"
+
+  # ── CRM: the customer ──────────────────────────────────────────────────
+  # The phone number is the natural identity — it is what WhatsApp delivers
+  # and what the production system keyed on. An identity key is un-maskable
+  # by construction; the NAME is the maskable PII, so it carries `sensitive`.
+  - name: customer
+    context: crm
+    display_name: Customer
+    plural: Customers
+    description: >-
+      One person who contacted the dealership — keyed by phone number (what
+      WhatsApp delivers). Carries the lead funnel state the follow-up loop
+      reads.
+    title_key: phone
+    icon: "👤"
+    color: "#3fb950"
+    category: CRM
+    customer_visible: false
+    identity:
+      key: [phone]
+    state:
+      - { name: phone, type: text, required: true, label: Phone, description: The customer's phone number — the WhatsApp identity and the record key }
+      - { name: name, type: text, sensitive: true, searchable: true, label: Name }
+      - { name: language, type: text, label: Language, description: "Detected contact language (de, en, …) — an open axis, replies follow it" }
+      - { name: lead_source, type: enum, value_set: contact_channel, label: Lead source, description: Where this customer first came from }
+      - { name: lead_status, type: enum, value_set: lead_status, label: Lead status, description: Funnel stage the follow-up loop reads }
+    commands:
+      - name: record_customer
+        label: Add a customer
+        description: >-
+          Add (or update) a customer record when someone new makes contact.
+          Phone is the key; set the lead source on first contact.
+        risk: low
+        inputs:
+          - phone
+          - { name: name, required: false }
+          - { name: language, required: false }
+          - { name: lead_source, required: false }
+          - { name: lead_status, required: false }
+
+  # ── CRM: the inquiry ───────────────────────────────────────────────────
+  - name: inquiry
+    context: crm
+    display_name: Inquiry
+    plural: Inquiries
+    description: >-
+      One customer question as it arrived (WhatsApp, mobile.de inbox, phone,
+      walk-in) — the raw demand signal. The `inquiry-triage` process reacts to
+      every new one.
+    title_key: inquiry_id
+    valid_time_field: received_on
+    icon: "💬"
+    color: "#8957e5"
+    category: CRM
+    customer_visible: false
+    identity:
+      key: [inquiry_id]
+    state:
+      - { name: inquiry_id, type: text, required: true, label: "Inquiry no." }
+      - { name: received_on, type: date, required: true, label: Received on, description: The day the message arrived — the tracking clock }
+      - { name: phone, type: text, required: true, label: Phone, description: Who asked (joins the customer) }
+      - { name: channel, type: enum, value_set: contact_channel, required: true, label: Channel }
+      - { name: summary, type: text, searchable: true, label: Summary, description: One-line gist of what was asked }
+      # Optional — a general inquiry ("do you have any small automatics?")
+      # names no vehicle, so the edge is not enforced.
+      - { name: vehicle_id, type: text, label: Vehicle, description: "The vehicle asked about, when the question names one" }
+    relations:
+      - name: asked_by
+        target: customer
+        via_field: phone
+        inverse_name: inquiries
+        enforced: true
+        description: The customer who asked — record_customer runs first on new contacts
+    commands:
+      - name: log_inquiry
+        label: Log an inquiry
+        description: >-
+          Log one customer question. Create/refresh the customer first
+          (record_customer) — the asked_by edge is enforced.
+        risk: low
+        inputs:
+          - inquiry_id
+          - received_on
+          - phone
+          - channel
+          - { name: summary, required: false }
+          - { name: vehicle_id, required: false }
+
+  # ── SALES: the viewing appointment ─────────────────────────────────────
+  # The calendar centerpiece: `date` is the valid-time axis, and the app's
+  # calendar view places every viewing on it.
+  - name: viewing
+    context: sales
+    display_name: Viewing
+    plural: Viewings
+    description: >-
+      One on-site viewing appointment — a customer, a vehicle, a date. The
+      lifecycle (requested → confirmed → completed / cancelled / no_show) is
+      tribe-owned.
+    title_key: viewing_id
+    valid_time_field: date
+    icon: "📅"
+    color: "#1f6feb"
+    category: Sales
+    customer_visible: false
+    identity:
+      key: [viewing_id]
+    state:
+      - { name: viewing_id, type: text, required: true, label: "Viewing no." }
+      - { name: date, type: date, required: true, label: Date, description: The day of the appointment — the calendar axis }
+      - { name: time_slot, type: text, label: Time, description: "Agreed time of day (e.g. 10:30) — text, the lot has no booking grid" }
+      - { name: phone, type: text, required: true, label: Phone, description: Who is coming }
+      - { name: vehicle_id, type: text, required: true, label: Vehicle, description: Which vehicle they want to see }
+      - { name: status, type: enum, value_set: viewing_status, required: true, salience: summary, label: Status }
+      - { name: notes, type: text, sensitive: true, label: Notes, description: Working notes for the salesperson on site }
+    relations:
+      - name: booked_by
+        target: customer
+        via_field: phone
+        inverse_name: viewings
+        enforced: true
+        description: The customer who booked
+      - name: shows
+        target: vehicle
+        via_field: vehicle_id
+        inverse_name: viewings
+        enforced: true
+        description: The vehicle being shown
+    commands:
+      - name: schedule_viewing
+        label: Book a viewing
+        description: >-
+          Book a viewing appointment: customer, vehicle, date. Status starts
+          at `requested`; confirm it once a human has checked the slot.
+        risk: low
+        inputs:
+          - viewing_id
+          - date
+          - { name: time_slot, required: false }
+          - phone
+          - vehicle_id
+          - status
+          - { name: notes, required: false }
+
+  # ── SALES: the price offer — ALWAYS the owner's call ───────────────────
+  # The production system's rule "escalate every negotiation" is modelled as
+  # a record + a reactive process: recording an offer IS the escalation. The
+  # agent's job ends at `record_price_offer`; the owner answers in the inbox.
+  - name: price_offer
+    context: sales
+    display_name: Price Offer
+    plural: Price Offers
+    description: >-
+      A price a customer offered for a vehicle. Every new one lands in the
+      owner's inbox (the `price-offer-approval` process) — accepted offers
+      become `deal` records, declined ones a notice. The agent never decides.
+    title_key: offer_id
+    valid_time_field: offered_on
+    icon: "🤝"
+    color: "#d29922"
+    category: Sales
+    customer_visible: false
+    identity:
+      key: [offer_id]
+    state:
+      - { name: offer_id, type: text, required: true, label: "Offer no." }
+      - { name: offered_on, type: date, required: true, label: Offered on, description: The day the offer was made }
+      - { name: phone, type: text, required: true, label: Phone, description: Who offered }
+      - { name: vehicle_id, type: text, required: true, label: Vehicle, description: For which vehicle }
+      - { name: offered_price_eur, type: decimal, required: true, vo: money_eur, role: bids, format: "currency:EUR", salience: summary, label: Offered price }
+      - { name: note, type: text, label: Note, description: "Context the owner should see (trade-in, financing, …)" }
+    relations:
+      - name: offered_by
+        target: customer
+        via_field: phone
+        inverse_name: offers
+        enforced: true
+        description: The customer who made the offer
+      - name: bids_on
+        target: vehicle
+        via_field: vehicle_id
+        inverse_name: offers
+        enforced: true
+        description: The vehicle the offer is for
+    commands:
+      - name: record_price_offer
+        label: Record a price offer
+        description: >-
+          Record a customer's price offer. This is the ONLY move the agent
+          makes in a negotiation — the offer routes to the owner's inbox, and
+          the owner's answer decides.
+        risk: low
+        inputs:
+          - offer_id
+          - offered_on
+          - phone
+          - vehicle_id
+          - offered_price_eur
+          - { name: note, required: false }
+        requires:
+          offered_price_eur: "> 0"
+
+  # ── SALES: the deal — written by the flow, not by hand ─────────────────
+  - name: deal
+    context: sales
+    display_name: Deal
+    plural: Deals
+    description: >-
+      An offer the owner accepted through the inbox — written by the
+      `price-offer-approval` flow's accepted branch, never by hand.
+    title_key: offer_id
+    icon: "✅"
+    color: "#3fb950"
+    category: Sales
+    customer_visible: false
+    identity:
+      key: [offer_id]
+    state:
+      - { name: offer_id, type: text, required: true, label: "Offer no.", description: The accepted offer }
+      - { name: phone, type: text, label: Phone, description: The buying customer }
+      - { name: vehicle_id, type: text, label: Vehicle, description: The vehicle sold }
+      - { name: offered_price_eur, type: decimal, vo: money_eur, role: bids, format: "currency:EUR", label: Agreed price, description: The accepted offer amount }
+      - { name: resolution, type: text, description: The owner disposition that filed this record }
+
+# ── The read-models (CQRS read side) ─────────────────────────────────────
+projections:
+  # Which vehicles draw interest — inquiries per vehicle. The pricing signal
+  # the production system computed from listing stats, here folded from the
+  # tribe's own demand records.
+  - name: vehicle_interest
+    context: summary
+    display_name: Vehicle Interest
+    plural: Vehicle Interest
+    description: Inquiries per vehicle — which cars draw attention, which sit quiet.
+    icon: "📈"
+    category: Summary
+    customer_visible: false
+    key: [vehicle_id]
+    fields:
+      - { name: vehicle_id, type: text }
+      - { name: inquiry_count, type: integer, description: How many inquiries named this vehicle }
+    grouped:
+      source: inquiry
+      group_by: vehicle_id
+      measures:
+        - { name: inquiry_count, op: count }
+
+  # The day's appointment load — viewings per day, the calendar's headline.
+  - name: viewings_by_day
+    context: summary
+    display_name: Viewings by Day
+    plural: Viewings by Day
+    description: Appointments per day — how full the lot's calendar is.
+    icon: "📅"
+    category: Summary
+    customer_visible: false
+    key: [date]
+    fields:
+      - { name: date, type: date }
+      - { name: viewings, type: integer, description: Appointments on that day }
+    grouped:
+      source: viewing
+      group_by: date
+      measures:
+        - { name: viewings, op: count }
+
+# ── The ACL / Source-Binding layer (ADR-0086 Chief-free intake) ──────────
+# The 30-minute inventory sync. In this committed example the locator is a
+# FOLDER (the dealer's export drop): drop the mobile.de CSV export into
+# `inbox/mobile-de-export` and the scheduler mirrors it — deterministic,
+# credential-free, e2e-testable. Going LIVE against the mobile.de Seller API
+# swaps this locator for a forged connector binding (ADR-0159; the committed
+# OAuth fixture for services.mobile.de exists) — the model, the target type
+# and the cadence stay exactly as written here.
+sources:
+  - slug: mobile-de-inventory
+    name: mobile.de Inventory Sync
+    locator: inbox/mobile-de-export
+    target_type: vehicle
+    trigger:
+      - { kind: cron, expr: "*/30 * * * *" }
+    extractor:
+      mechanism: tabular
+      config:
+        columns: [ad_id, make, model, first_registration, mileage_km, price_eur, fuel, gearbox, color, status, listed_on]
+        mapping:
+          - { column: ad_id, field: vehicle_id, ty: text } # rename — the export calls it ad_id
+          - { column: make, field: make, ty: text }
+          - { column: model, field: model_name, ty: text } # rename — `model_name` keeps the field unambiguous
+          - { column: first_registration, field: first_registration, ty: text }
+          - { column: mileage_km, field: mileage_km, ty: int }
+          - { column: price_eur, field: price_eur, ty: decimal }
+          - { column: fuel, field: fuel, ty: text }
+          - { column: gearbox, field: gearbox, ty: text }
+          - { column: color, field: color, ty: text }
+          - { column: status, field: status, ty: text }
+          - { column: listed_on, field: listed_on, ty: date }
+
+# ── The reactive processes (ADR-0118 D14 — constitutional "when X → do Y") ──
+processes:
+  # Every price negotiation goes to the owner — recording the offer IS the
+  # escalation. The inbox answer routes the walk: accepted files a deal,
+  # declined sends a notice back to the operator surface.
+  - slug: price-offer-approval
+    name: Price Offer Approval
+    description: >-
+      When a customer's price offer is recorded, ask the owner to accept or
+      decline it. Accepted offers become deal records; declined ones a notice.
+      The agent never decides a discount.
+    on: { new: price_offer }
+    steps:
+      - id: ask-owner
+        does: notify
+        using: notify-operator
+        config:
+          severity: info
+          title: "Price offer {{ offer_id }}: {{ offered_price_eur }} EUR"
+          body: "Offer for vehicle {{ vehicle_id }} from {{ phone }}: {{ offered_price_eur }} EUR. Accept or decline?"
+          wait_for_resolution: true
+          # A day to answer; an unanswered offer is DECLINED, never silently
+          # accepted — the safe default direction for a price decision.
+          deadline_secs: 86400
+          on_deadline: proceed
+          default_action: rejected
+      - id: file-deal
+        does: file
+        using: store
+        config:
+          to: deal
+          key: offer_id
+          set:
+            offer_id: offer_id
+            phone: phone
+            vehicle_id: vehicle_id
+            offered_price_eur: offered_price_eur
+            resolution: resolution
+      - id: decline-notice
+        does: notify
+        using: notify-operator
+        config:
+          severity: info
+          title: "Offer {{ offer_id }} declined"
+          body: "The owner declined the offer of {{ offered_price_eur }} EUR for vehicle {{ vehicle_id }}. Tell the customer the asking price stands."
+      # ADR-0118 PR-12 — a `new` process needs a `review` fallback for runtimes
+      # without the multi-stage reactive walk.
+      - id: fallback
+        does: review
+        using: noop
+    flow:
+      - { from: ask-owner, to: file-deal, when: "resolution == 'approved'" }
+      - { from: ask-owner, to: decline-notice, when: "resolution == 'rejected'" }
+      - { from: fallback, to: "done: fallback" }
+
+  # Every new inquiry gets triaged by the inquiry-triage worker: link the
+  # customer, match the vehicle, keep the funnel state honest. A single-step
+  # `new` reaction, the fitness recipe-frontier shape.
+  - slug: inquiry-triage
+    name: Inquiry Triage
+    description: >-
+      When a new inquiry lands, the inquiry-triage worker links it to the
+      customer record, matches the vehicle when one is named, and moves the
+      lead's funnel state — so no interested customer is forgotten.
+    on: { new: inquiry }
+    steps:
+      - { id: triage, does: review, using: inquiry-triage }

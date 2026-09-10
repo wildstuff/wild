@@ -1,0 +1,9 @@
+{
+  "name": "extract-domain",
+  "version": "0.1.3",
+  "flavor": "tool-provider",
+  "wit_baseline": "wild:tool-provider@0.4.0",
+  "tools": [
+    "extract_domain"
+  ]
+}

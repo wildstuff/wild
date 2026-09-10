@@ -1,0 +1,30 @@
+# `wild tribe apply <bundle-dir>` reads this file. Schema lives in
+# `crates/common/src/bundle.rs::BundleManifest`. Per-field comments
+# below explain what an operator needs to know to fork this example.
+schema_version: "1"
+
+# Tribe slug. Lowercase letters, digits, and `-` only — the runtime
+# enforces `^[a-z][a-z0-9-]{0,62}$`. Pick something short; this id
+# appears in every NATS subject (`wild.<name>.…`) so brevity helps.
+name: math-tribe
+
+description: >
+  Multi-path arithmetic agent — answers user math questions either
+  directly via reply_to_user or by delegating to the math worker
+  via dispatch_task. Used as a reproducible end-to-end smoke
+  fixture and as a fork-starter for "what does a minimal tribe
+  look like?".
+
+# Where this tribe attaches in the hierarchy. `root` = top-level
+# tribe under the Elder; nested tribes set their parent's slug.
+parent_tribe: root
+
+# No cron — this tribe is purely user-message-driven. Set
+# `schedule: "0 9 * * *"` (or one of the slim-cycle fields) when
+# you want autonomous wakes; see docs/cycle-schedules.md.
+
+# Worker fan-out. Each `ref:` points at a YAML file inside this
+# bundle. The bundle handler joins manifest.yaml + workers/*.yaml
+# into the deploy RenderInput.
+workers:
+  - ref: workers/math.yaml
