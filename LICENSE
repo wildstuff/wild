@@ -1,0 +1,67 @@
+# License
+
+This repository is the public distribution of The Wild. It is **generated** —
+its contents are materialised from an upstream development repository — and
+different parts carry different terms. This file states which.
+
+## Apache-2.0
+
+The following are licensed under the **Apache License, Version 2.0**. They
+exist to be read, copied, and built against, and copying them into your own
+project is the intended use:
+
+| Path | What it is |
+|---|---|
+| `wit/` | the WIT interface contracts |
+| `examples/` | working code samples |
+| `plugins/tool-provider-scaffold/` | the plugin template |
+
+The full Apache-2.0 text is at
+<https://www.apache.org/licenses/LICENSE-2.0>, and a verbatim copy ships in
+`wit/LICENSE`.
+
+```
+Copyright 2026 Wildstuff
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use these files except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```
+
+## Documentation
+
+`docs/` and `README.md` are © 2026 Wildstuff, published here so you can read
+them. They are **not** under Apache-2.0. You may quote them with attribution;
+redistributing them as your own documentation needs written permission.
+
+## The installer
+
+`install.sh` is published so you can read what it does before running it, and
+so `curl … | sh` resolves. It is © 2026 Wildstuff. Run it, read it, audit it —
+redistributing a modified installer under the Wild name needs written
+permission.
+
+## The software itself
+
+The Wild is **commercially licensed**. Binaries published as release assets
+here are governed by the end-user terms accompanying that distribution; absent
+such terms, they are made available for evaluation only and convey no rights
+beyond a separate written agreement with Wildstuff.
+
+The source of the runtime is not published in this repository.
+
+## Third parties
+
+Dependencies retain their own licenses.
+
+---
+
+Questions about licensing: <https://wildstuff.dev>

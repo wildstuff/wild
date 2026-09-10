@@ -1,0 +1,99 @@
+# Constitution of the notify-and-wait reference tribe (ADR-0108 DDD lane).
+# One folder source, one source process — the smallest model that exercises
+# ADR-0125 Phase 2 "notify-and-wait": the walk blocks on the operator inbox
+# and resumes with the operator's answer as a top-level `resolution` field.
+context: expenses
+
+aggregates:
+  - name: expense_drop
+    display_name: Expense Drop
+    plural: Expense Drops
+    description: >-
+      One expense report as delivered into the folder — mirrored from the CSV
+      drop, never hand-edited.
+    title_key: expense_id
+    identity:
+      key: [expense_id]
+    mirror:
+      - { name: expense_id, type: text, required: true, description: The expense report number }
+      - { name: amount, type: decimal, description: "Gross amount in EUR (a real expense export carries decimal euros, e.g. 125.00 — not integer cents)" }
+      - { name: vendor, type: text, description: Who issued the expense }
+
+  - name: approved_expense
+    display_name: Approved Expense
+    plural: Approved Expenses
+    description: >-
+      An expense that the operator approved through the inbox — written by the
+      flow's "file" branch, not by hand.
+    title_key: expense_id
+    identity:
+      key: [expense_id]
+    state:
+      - { name: expense_id, type: text, required: true, description: The approved expense report number }
+      - { name: amount, type: decimal, description: "Gross amount in EUR (a real expense export carries decimal euros, e.g. 125.00 — not integer cents)" }
+      - { name: vendor, type: text, description: Who issued the expense }
+      - { name: resolution, type: text, description: The operator disposition that filed this record }
+
+sources:
+  - slug: expenses-inbound
+    name: Speseneingang
+    locator: inbox/expenses
+    target_type: expense_drop
+    trigger:
+      - { kind: interval, seconds: 3600 }
+    columns: [expense_id, vendor, amount]
+    mapping:
+      - { column: expense_id, field: expense_id, ty: text }
+      - { column: vendor, field: vendor, ty: text }
+      - { column: amount, field: amount, ty: decimal }
+
+processes:
+  - slug: expense-approval
+    name: Spesenfreigabe
+    description: >-
+      When an expense file arrives, ask the operator to approve or reject it.
+      The flow resumes with the operator's answer and routes to the matching
+      branch.
+    on: { new: expense_drop }
+    steps:
+      - id: approve
+        does: notify
+        using: notify-operator
+        config:
+          severity: info
+          title: "Expense {{ expense_id }} awaiting approval"
+          body: "Amount: {{ amount }} EUR. Please approve or reject."
+          wait_for_resolution: true
+          deadline_secs: 5
+          on_deadline: proceed
+          default_action: rejected
+      - id: file-approved
+        does: file
+        using: store
+        config:
+          to: approved_expense
+          key: expense_id
+          set:
+            expense_id: expense_id
+            amount: amount
+            vendor: vendor
+            resolution: resolution
+      - id: reject-notice
+        does: notify
+        using: notify-operator
+        config:
+          severity: warning
+          title: "Expense {{ expense_id }} rejected"
+          body: "The expense was rejected by the operator."
+      # ADR-0118 PR-12 — a `new` process needs a `review` fallback for runtimes
+      # without the multi-stage reactive walk. This fixture runs on the walk,
+      # so the fallback is never invoked.
+      - id: fallback
+        does: review
+        using: noop
+    flow:
+      - { from: approve, to: file-approved, when: "resolution == 'approved'" }
+      - { from: approve, to: reject-notice, when: "resolution == 'rejected'" }
+      # The v1-fallback review step is required by the compiler but never reached
+      # on the multi-stage reactive walk; wire it to a clean terminal.
+      - { from: fallback, to: "done: fallback" }

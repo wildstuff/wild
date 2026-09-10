@@ -1,0 +1,92 @@
+# ADR-0202 D4 — the model manifest for the `cash_forecast` Procedure.
+#
+# The audit card. Every number here is measured, not claimed: the tests in
+# `src/procedure.rs` re-derive `parameters` and `holdout.score` from the training
+# extract this file names, and fail if either drifts. D7.2 asks that an
+# auditor be able to re-check a Procedure with a spreadsheet — that is what
+# makes this a record rather than a story.
+#
+# At runtime this rides `forge.meta.json` → `ForgeBuildCompleteEvent` →
+# `ComponentTypeYaml.model` (ADR-0202 D10.2). It is kept here beside the
+# source because that workspace file is written by the host, never
+# committed — this is the authored half a re-forge starts from.
+---
+slug: cash_forecast
+version: v4
+method: >-
+  Seasonal weekly-bucket model over payment inflows. Each week of the year
+  gets one multiplicative factor, fitted as the mean inflow of that bucket
+  divided by the overall mean of the training window; the forecast is the
+  baseline times the factor of the bucket the target date falls in. Weekly
+  buckets are counted from the epoch Monday 2023-01-02. No trend term and
+  no outlier handling — the fit is deliberately the simplest thing that
+  carries the seasonality, so it stays hand-checkable.
+parameters:
+  baseline_eur: 42068.98
+  seasonality:
+    kw1: 1.139438
+    kw2: 1.155849
+    kw3: 1.173192
+    kw4: 1.114195
+    kw5: 1.103440
+    kw6: 1.072070
+    kw7: 1.083286
+    kw8: 1.071456
+    kw9: 1.042828
+    kw10: 1.010776
+    kw11: 1.000225
+    kw12: 1.012079
+    kw13: 0.959928
+    kw14: 0.908860
+    kw15: 0.920973
+    kw16: 0.925069
+    kw17: 0.885404
+    kw18: 0.872630
+    kw19: 0.819894
+    kw20: 0.853340
+    kw21: 0.827174
+    kw22: 0.833893
+    kw23: 0.830658
+    kw24: 0.838042
+    kw25: 0.828616
+    kw26: 0.802870
+    kw27: 0.818511
+    kw28: 0.817202
+    kw29: 0.856734
+    kw30: 0.853330
+    kw31: 0.880912
+    kw32: 0.906944
+    kw33: 0.912238
+    kw34: 0.934974
+    kw35: 0.955776
+    kw36: 1.018011
+    kw37: 1.021590
+    kw38: 1.009439
+    kw39: 1.001600
+    kw40: 1.050684
+    kw41: 1.077873
+    kw42: 1.127362
+    kw43: 1.124998
+    kw44: 1.156639
+    kw45: 1.126004
+    kw46: 1.168409
+    kw47: 1.147628
+    kw48: 1.175840
+    kw49: 1.194009
+    kw50: 1.193881
+    kw51: 1.168714
+    kw52: 1.214514
+holdout:
+  metric: mape
+  score: 0.0353
+  evaluated_at: 2026-08-12
+trained_on:
+  # ADR-0202 D12 — which domain's `payment` this was cut from. The card is
+  # fleet-wide; the type slug is not.
+  tribe: liquidity-management
+  type: payment
+  snapshot: inflows-2023-2026
+  as_of: 2025-12-22
+source_ref:
+  spec: examples/tool-providers/cash-forecast
+  digest: sha256:fedcae91a419108944df9efee02cc73d383f8a1fa2df468445e0c1d9073b1847

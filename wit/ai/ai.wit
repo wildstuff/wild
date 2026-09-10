@@ -1,0 +1,567 @@
+// WILD AI Interface
+// Provides AI chat capabilities to components.
+// Implemented by: anthropic-cli, openrouter, ollama (future), or any
+// LLM provider.
+//
+// @0.3.0 — breaking cut. Makes `embed-request.model` optional so the
+// host resolver can pick the adapter from `(caller, embed_routing)`
+// instead of requiring every caller to hard-code an adapter id.
+// Mirrors the chat path: an omitted model routes through the single
+// sanctioned embed resolver; a supplied model is treated as an
+// author-pin (wins when wired, falls through to resolver when not).
+//
+// @0.2.0 — previous breaking cut. Dropped the dead adapter-discovery
+// surface from `interface chat`: the `list-adapters` /
+// `find-adapter-capabilities` query funcs and their
+// `adapter-capabilities` record are removed. No guest ever called
+// them — routing runs through the host's StrategyMap, not a guest-side
+// capability lookup.
+//
+// (Historical WIT-internal labels below — 0.3.x/0.2.0 — predate the
+// `wild:ai@<pkg>` package coordinate and describe the chat type
+// reshapes, not the package version.)
+//
+// 0.3.0 (L2b) — breaking reshape of `message`. The legacy
+// `content: string` + sibling fields `tool-call-id` + `tool-calls`
+// are REMOVED. `message.content` is now `list<content-block>` —
+// text/thinking/tool-use/tool-result/image blocks line up 1:1 with
+// Anthropic's wire format. Tool-use round-trips ride through
+// `content-block.tool-use` + `content-block.tool-result` instead of
+// the parallel `tool-calls` + `tool-call-id` fields. Cache-control
+// markers can now live on individual text blocks (orchestrator's
+// system-prompt + tool-list cacheable prefix). Pre-1.0 minor bump =
+// breaking; every consumer must upgrade in lockstep.
+//
+// 0.2.0 (L3a) — additive bump for the LLM-adapters bundled
+// trait-foundation: `content-block`, `cache-control`, `session-ref`,
+// `session-id`, `stop-reason`, `image-source` types added; new
+// optional fields on chat-request / chat-response (`session`,
+// `session-id`, `stop-reason`).
+//
+// Mirror types are pinned in `common::ai`. Adapter rust traits and
+// the host `wild:ai` plugin sit on `common::ai::Message` /
+// `ContentBlock`.
+//
+// Sibling-repo WIT-pull lane (L3b) is the hard sync point that
+// follows every package bump: every consumer (orchestrator,
+// ai-worker, http-fetcher, openrouter, anthropic-cli, wild) must
+// vendor the bumped WIT before adapter / consumer migrations land.
+
+package wild:ai@0.4.0;
+
+interface chat {
+
+    // ─── L2/L3 trait-foundation types (0.2.0) ───
+    //
+    // These mirror common::ai 1:1. Wire format pinned by the
+    // common::ai unit tests + tagged with `kind` discriminators in
+    // kebab-case so cross-language consumers (Tier-2 Wasm-component
+    // adapters in any guest lang, Phase 7) see canonical strings.
+
+    /// Caller-controlled cache hint on a content block. Today's
+    /// only variant is `ephemeral` (Anthropic's `cache_control:
+    /// {type: "ephemeral"}` shape); `persistent` may follow.
+    variant cache-control {
+        ephemeral(cache-ttl),
+    }
+
+    /// Per-cache TTL choice. Adapters that don't honour the chosen
+    /// TTL silently downgrade rather than failing the call.
+    variant cache-ttl {
+        /// Adapter-default: Anthropic = 5min, OpenAI = implicit
+        /// (server-controlled), Gemini = no-op (cachedContent is
+        /// a separate API surface), Ollama = no-op.
+        %default,
+        /// Anthropic paid tier — explicit 1h cache. Other providers
+        /// treat as `default`.
+        one-hour,
+        /// Adapter-specific raw TTL in seconds. Adapters that don't
+        /// expose seconds-grained control treat as `default`.
+        adapter-specific(u64),
+    }
+
+    /// One piece of message content. Tagged-union with kebab-case
+    /// discriminator (text/thinking/tool-use/tool-result/image).
+    /// Replaces the legacy `message.content: string` shape — the
+    /// reshape on `message` itself is L2b, not L3a; this variant
+    /// lands as the carrier ahead of that work.
+    variant content-block {
+        text(text-block),
+        thinking(thinking-block),
+        tool-use(tool-call),
+        tool-result(tool-result-block),
+        image(image-source),
+    }
+
+    record text-block {
+        text: string,
+        /// Optional cache marker. None for most blocks; Some for
+        /// system prompts + cached tool-list blocks where the
+        /// caller wants the adapter's prompt-cache to hit.
+        cache-control: option<cache-control>,
+    }
+
+    record thinking-block {
+        text: string,
+        /// Provider-side signature for replay protection. None for
+        /// adapters that don't sign (OpenRouter OpenAI-shape,
+        /// Ollama, DeepSeek-R1 via `<think>` tags).
+        signature: option<string>,
+    }
+
+    record tool-result-block {
+        /// Echoes the `id` of the matching tool-use block.
+        tool-use-id: string,
+        /// Result body — typically JSON-encoded but adapters don't
+        /// validate (some tools return plain text).
+        content: string,
+        /// `true` when the tool failed; the model treats it as a
+        /// signal to adapt rather than re-call.
+        is-error: bool,
+    }
+
+    /// Image input — base64 inline or URL reference. Adapter
+    /// selects the wire format the upstream accepts (Anthropic =
+    /// base64-only, OpenAI + Gemini = URL or base64).
+    variant image-source {
+        base64(image-base64),
+        url(string),
+    }
+
+    record image-base64 {
+        media-type: string,
+        data: string,
+    }
+
+    /// Opaque session identifier. Adapters MUST NOT parse this —
+    /// it's the orchestrator's invariant. The orchestrator
+    /// allocates ids in the format `{tribe-id}-{cycle-id}` for
+    /// cycle-scoped sessions (race-free across deferred-trigger
+    /// re-attempts because cycle-id always increments).
+    record session-id {
+        id: string,
+    }
+
+    /// Session affinity hint on a chat request. Stateless adapters
+    /// silently ignore.
+    variant session-ref {
+        /// Open a fresh session for THIS call. Stateful adapters
+        /// allocate a new session-id and return it on the response.
+        new,
+        /// Re-enter the named session. Stateful adapter looks up
+        /// the id in its pool — hot-path resumes from in-memory
+        /// process, cold-path re-spawns.
+        %continue(session-id),
+    }
+
+    /// Why the assistant stopped generating. Adapter normalises
+    /// from upstream (Anthropic stop_reason, OpenAI finish_reason,
+    /// Ollama done_reason) into this set.
+    variant stop-reason {
+        /// Assistant finished normally.
+        end-turn,
+        /// Hit max-tokens cap.
+        max-tokens,
+        /// Assistant emitted tool-use blocks; caller must execute.
+        tool-use,
+        /// Hit a configured stop-sequences string.
+        stop-sequence,
+        /// Anthropic 4.5+ explicit refusal — model declined to
+        /// answer (safety, policy).
+        refusal,
+        /// Provider-specific reason that doesn't map to the
+        /// canonical set. Carries the raw upstream string.
+        other(string),
+    }
+
+    // ─── Types ───
+
+    record chat-request {
+        /// System prompt (sets behavior/role for the AI)
+        system: string,
+        /// Conversation messages
+        messages: list<message>,
+        /// Available tools the AI can call
+        tools: option<list<tool-definition>>,
+        /// Max tokens in response
+        max-tokens: option<u32>,
+        /// Model override (default from provider config)
+        model: option<string>,
+        /// Caller context (for operation-event publication and
+        /// lock-refresh routing). The provider publishes
+        /// wild.system.operation.started/finished tagged with this
+        /// holder so system can refresh the holder's cycle lock
+        /// while the call is in flight. None → no operation event
+        /// emitted (used only for callers outside any cycle, e.g.
+        /// CLI one-shot evaluation).
+        ///
+        /// Authoritativeness: the provider does NOT trust the
+        /// `tribe-id` field for cost-attribution / quota /
+        /// audit purposes. It cross-checks against the caller
+        /// identity from the host-stamped `actor`/`originator` on
+        /// the envelope. The field exists so Claude's internal
+        /// correlation (cycle-id) survives, but `tribe-id`
+        /// here is treated as advisory only — the authoritative
+        /// org for billing is the provider-derived one.
+        /// Mismatch is logged as a security event and the
+        /// authoritative id wins (Phase E may switch to fail).
+        caller-context: option<caller-context>,
+        /// If set, the provider mirrors the upstream SSE stream as
+        /// chat-stream-event JSON messages on this NATS subject
+        /// while the call is in flight. The function still returns
+        /// the final aggregated chat-response. Multi-subscriber:
+        /// TUI for live render, audit for tool-call delta capture,
+        /// decisions for early diff_ratio etc.
+        ///
+        /// Convention: wild.{tribe}.ai.streaming.{cycle-id}.{call-id}.
+        /// Publishing is gated by the provider's manifest subject
+        /// allowlist — caller picks the subject, provider verifies
+        /// it falls inside its allowed_publish set, otherwise the
+        /// call returns an UndeclaredCrossOrgPublish error.
+        /// None → non-streaming (single HTTP request, no SSE).
+        stream-subject: option<string>,
+        /// Provider-feature toggles. Empty in MVP. Phase B adds
+        /// "thinking" (Claude extended thinking, requires the
+        /// thinking content-block in the SSE stream), "vision",
+        /// "json-mode".
+        features: list<string>,
+        /// Server-side MCP connector configurations. Empty/None means
+        /// no MCP servers — pure tool-use mode via the `tools` field.
+        /// See `mcp-server-spec` below for the per-server shape.
+        ///
+        /// When set, the provider passes these through to Anthropic's
+        /// Messages API as the `mcp_servers` request-body field;
+        /// Anthropic's server then connects to each declared MCP
+        /// endpoint, lists its tools, and exposes them to the model
+        /// alongside the explicit `tools` array. Per-call routing
+        /// (Phase B5 / E7) decides whether the connector list comes
+        /// from per-instance config (wasi:config/runtime) or from the
+        /// WorkerTask payload.
+        mcp-servers: option<list<mcp-server-spec>>,
+        /// ADR-0204 D5 — per-call sampling temperature. Adapters that
+        /// cannot honor the knob ignore it; a declared override that
+        /// does nothing is a house-rule lie. Omitted / None keeps the
+        /// adapter's default temperature.
+        temperature: option<f64>,
+        /// L3a (0.2.0) — opt-in session affinity hint. None =
+        /// stateless path (every adapter); some(session-ref.new)
+        /// = stateful adapter opens a new session for this call;
+        /// some(session-ref.continue(id)) = re-enter named session.
+        /// Stateless adapters (openrouter, claude-direct,
+        /// ollama-default) silently ignore the field.
+        ///
+        /// Default None — every existing 0.1.0 caller stays
+        /// compatible. Wire-shape pin: serializes through serde
+        /// `tag = "kind"` so a `none` value is omitted entirely.
+        session: option<session-ref>,
+    }
+
+    /// Server-side MCP connector spec. When set on a chat-request, the
+    /// Anthropic API connects to each listed MCP server, fetches its
+    /// tool list, and exposes those tools to the model — alongside any
+    /// `tools` array. The model can call MCP tools and Anthropic surfaces
+    /// the results back as tool_use / tool_result content blocks
+    /// transparently. See https://docs.claude.com (Messages API → MCP).
+    ///
+    /// Phase B5 (Skills) populates this from each ai-worker's
+    /// blueprint-declared MCP server set; per-instance via
+    /// wasi:config/runtime in per-instance mode, or per-call via
+    /// WorkerTask in pool mode (E7).
+    record mcp-server-spec {
+        /// Connector kind. MVP only supports "url". `kind` rather than
+        /// `type` because `type` is a reserved WIT keyword; the lib-side
+        /// struct serializes this as Anthropic's wire field name `type`.
+        kind: string,
+        /// Public HTTPS endpoint of the MCP server.
+        url: string,
+        /// Human-readable identifier (the name Anthropic exposes to
+        /// Claude when listing the available tools).
+        name: string,
+        /// Optional bearer for the MCP server. Forwarded as
+        /// `Authorization: Bearer <token>` by Anthropic on each call.
+        authorization-token: option<string>,
+    }
+
+    /// Identifies the holder of a long-running operation. Used by
+    /// providers to tag operation-started / operation-finished events
+    /// so system can refresh the holder's lock until the call ends.
+    record caller-context {
+        /// Holder kind. MVP: "cycle". Phase B may add "user-direct".
+        kind: string,
+        /// Tribe whose lock should be refreshed. Advisory only —
+        /// provider authoritatively derives it from the host-stamped
+        /// `actor`/`originator` on the envelope (see chat-request docs).
+        tribe-id: string,
+        /// Cycle ID of the holder (matches the lock's holder field).
+        cycle-id: string,
+        // NOTE: there is deliberately NO `actor` / role field here.
+        // Host-asserted identity (the acting principal the RBAC gate
+        // reads) lives only on `WildStore.actor`, stamped per-message
+        // from NATS headers the host alone writes. A component cannot
+        // assert an identity — `broker-message` carries no headers and
+        // the host never forwards guest-controlled ones — so there is
+        // no channel to forge a role here. That absence is the
+        // guarantee: you cannot spoof what you cannot express.
+    }
+
+    /// One conversation turn carrying a list of typed content blocks.
+    /// 0.3.0 reshape — replaces the legacy `content: string` +
+    /// `tool-call-id` + `tool-calls` triple. Text payload lives in
+    /// `content-block.text`; tool-use round-trips ride through
+    /// `content-block.tool-use` (assistant turn) + `tool-result`
+    /// (user-role follow-up turn). Cache markers ride on individual
+    /// text blocks via `text-block.cache-control`.
+    record message {
+        /// "user", "assistant", or "tool" (the latter is rare —
+        /// adapters typically map tool-result-blocks onto user-role
+        /// messages per Anthropic's preferred wire shape).
+        role: string,
+        /// Content blocks in send-order. Empty list is allowed only
+        /// on assistant messages that produced no text + no tools
+        /// (rare); typical messages carry one or more blocks.
+        content: list<content-block>,
+    }
+
+    record tool-definition {
+        /// Tool name (e.g., "web_fetch", "docs_read")
+        name: string,
+        /// Description for the AI
+        description: string,
+        /// JSON Schema string for parameters
+        parameters-schema: string,
+    }
+
+    record chat-response {
+        /// Text response from AI
+        content: option<string>,
+        /// Tool calls the AI wants to make
+        tool-calls: list<tool-call>,
+        /// Token usage
+        usage: token-usage,
+        /// Which model was used
+        model: string,
+        /// L3a (0.2.0) — session id assigned by a stateful adapter
+        /// when the request opened (session-ref.new) or extended
+        /// (session-ref.continue) a session. None for stateless
+        /// adapters or when the caller did not request a session.
+        ///
+        /// Default None — every existing 0.1.0 producer stays
+        /// compatible.
+        session-id: option<session-id>,
+        /// L3a (0.2.0) — normalised stop reason. None for adapters
+        /// that haven't migrated to set it yet (per-adapter mapping
+        /// lands in L4/L5). some(stop-reason.end-turn) is the most
+        /// common terminal value; some(stop-reason.tool-use) signals
+        /// the caller must execute the assistant's tool-calls and
+        /// reply with a tool-result follow-up turn.
+        stop-reason: option<stop-reason>,
+        /// ADR-0042 — per-turn latency observability. `Some(_)`
+        /// when the adapter could observe chunk-level stream
+        /// timing; `None` for buffered fallbacks. Additive within
+        /// 0.1.0 — pre-ADR-0042 producers stay compatible.
+        latency: option<latency-metrics>,
+    }
+
+    record tool-call {
+        /// Unique ID for this call
+        id: string,
+        /// Tool name
+        name: string,
+        /// JSON string of arguments
+        arguments: string,
+    }
+
+    record token-usage {
+        /// Input tokens EXCLUDING the cache counters below (the
+        /// Anthropic wire shape). The full window fill is
+        /// input + cache-read + cache-creation — consumers summing
+        /// the fields must get the true total exactly once. Adapters
+        /// whose provider reports a GROSS prompt total (OpenAI
+        /// family: `prompt_tokens` includes the cached prefix)
+        /// normalise by subtracting the cache counters on the way in.
+        input-tokens: u32,
+        output-tokens: u32,
+        /// Cache-read input tokens (Anthropic prompt cache).
+        /// 0 if cache wasn't used. Provider returns this so the
+        /// claude provider's cost-tracker can credit the cache hit.
+        cache-read-input-tokens: u32,
+        /// Cache-creation input tokens.
+        cache-creation-input-tokens: u32,
+    }
+
+    /// ADR-0042 — per-turn LLM latency observability. Adapters
+    /// with stream-level visibility (anthropic-cli reads claude-CLI
+    /// stream-json frames; openai/openrouter watch SSE chunks)
+    /// populate this on every chat-response. Buffered fallbacks
+    /// leave `latency: None` on the parent `chat-response` and the
+    /// host shim falls back to its own `elapsed_ms` (request-to-
+    /// response wall-clock) in the operator log.
+    ///
+    /// All fields are in milliseconds. `total = ttft + body` for
+    /// fully-observed streams; buffered adapters that only see
+    /// the final frame should set `ttft = total` and `body = 0`
+    /// so derived metrics stay self-consistent.
+    record latency-metrics {
+        /// Time-to-first-token in ms. From the moment the adapter
+        /// wrote the user-frame to the upstream (or spawned the
+        /// subprocess for claude-CLI) until the first content
+        /// chunk arrived back.
+        ttft-ms: u64,
+        /// Body duration in ms — from first content chunk to
+        /// final frame. `output-tokens / (body-ms / 1000)` yields
+        /// the output throughput in tokens-per-second.
+        body-ms: u64,
+        /// Total wall-clock from request to response in ms.
+        total-ms: u64,
+        /// Number of stream chunks/frames observed (assistant
+        /// deltas + final). 1 for adapters that only surface the
+        /// final frame; N>1 for true token-level streaming.
+        chunk-count: u32,
+    }
+
+    // ─── Streaming events ───
+    //
+    // When chat-request.stream-subject is set, the provider publishes
+    // a sequence of chat-stream-event records on that NATS subject
+    // (one event per upstream SSE event from Anthropic). The events
+    // mirror Anthropic's SSE protocol so subscribers can reconstruct
+    // either tokens (for live render) or the final response.
+    //
+    // Order on the wire is always:
+    //   message-start
+    //   ( content-block-start
+    //     content-block-delta*
+    //     content-block-stop )*
+    //   message-delta             (final usage update)
+    //   message-stop
+    // or:
+    //   error                     (terminates the stream)
+
+    /// Tagged union of streaming events.
+    variant chat-stream-event {
+        /// First event. Carries model name, message id, initial usage.
+        message-start(message-start-event),
+        /// A new content block started (text | thinking | tool-use).
+        content-block-start(content-block-start-event),
+        /// Incremental delta inside an open content block.
+        content-block-delta(content-block-delta-event),
+        /// The current content block ended.
+        content-block-stop(u32),                    // block-index
+        /// Mid-stream usage / stop-reason update.
+        message-delta(message-delta-event),
+        /// Stream complete; subscribers can stop reading.
+        message-stop,
+        /// Stream aborted with an error.
+        error(string),
+    }
+
+    record message-start-event {
+        message-id: string,
+        model: string,
+        /// Initial usage (input-tokens known, output-tokens=0).
+        usage: token-usage,
+    }
+
+    record content-block-start-event {
+        block-index: u32,
+        /// "text" | "thinking" | "tool_use"
+        block-type: string,
+        /// For tool_use blocks: tool name + tool-use id.
+        tool-call: option<tool-call>,
+    }
+
+    /// Incremental delta. For text blocks: text delta.
+    /// For thinking blocks: thinking delta. For tool_use blocks:
+    /// JSON-fragment delta of the tool arguments.
+    record content-block-delta-event {
+        block-index: u32,
+        /// "text-delta" | "thinking-delta" | "input-json-delta"
+        delta-type: string,
+        /// The delta text / json-fragment.
+        delta: string,
+    }
+
+    record message-delta-event {
+        /// Cumulative usage update (output-tokens grows over time).
+        usage: token-usage,
+        /// Set on the final message-delta. "end_turn" | "tool_use"
+        /// | "max_tokens" | "stop_sequence".
+        stop-reason: option<string>,
+    }
+
+    // ─── Functions ───
+
+    /// Send a chat request and get the final aggregated response.
+    /// If chat-request.stream-subject is set, the provider also
+    /// publishes chat-stream-event records on that subject during
+    /// the call (multi-subscriber observation; doesn't change the
+    /// caller's return value).
+    chat: func(request: chat-request) -> result<chat-response, string>;
+}
+
+// Text → embedding-vector modality. The `wild:ai/embed` extension the
+// `WildAiPlugin` doc-comment names as a planned sibling to `chat`.
+// Mirrors `interface chat`'s registry-by-model-id dispatch + caller-
+// context tenant scoping, MINUS streaming (embeddings return as one
+// aggregated batch). Strictly additive — `interface chat` is unchanged.
+interface embed {
+
+    // REUSE chat's shared, modality-agnostic types — caller-context
+    // (tenant scoping + lock refresh) + token-usage (cost tracking).
+    use chat.{caller-context, token-usage};
+
+    /// A batch embed request. `input` is a batch — the common shape;
+    /// one round-trip embeds many strings. A single-string embed is a
+    /// one-element list.
+    record embed-request {
+        /// Texts to embed, in order. `embed-response.embeddings` is
+        /// index-aligned to this list.
+        input: list<string>,
+        /// Adapter id — the dispatch key (`request.model ==
+        /// backend.id()`), exactly like `chat-request.model`. `None`
+        /// routes through the host's embed resolver using
+        /// `caller-context.kind`; `Some(id)` is treated as an author
+        /// pin (wins when wired, falls through to the resolver when
+        /// not).
+        model: option<string>,
+        /// Tenant scoping + lock refresh; identical semantics to
+        /// `chat-request.caller-context`. None for non-cycle callers.
+        /// When `model` is `None`, `caller-context.kind` is the
+        /// resolver input; callers SHOULD always set it.
+        caller-context: option<caller-context>,
+        /// Requested output dimensionality. None = adapter/model
+        /// default. Adapters that can't honour it embed at their
+        /// native dim and report the actual `dims` in the response.
+        dimensions: option<u32>,
+        /// Truncate over-long inputs to the model's max instead of
+        /// erroring. None = adapter default.
+        truncate: option<bool>,
+    }
+
+    /// Batch embed response. `embeddings` is index-aligned to the
+    /// request's `input`.
+    record embed-response {
+        /// One vector per input string, same order. Every inner list
+        /// has length `dims`.
+        embeddings: list<list<f32>>,
+        /// Provider model id that produced the vectors.
+        model: string,
+        /// Token usage when the provider reports it; None for local
+        /// adapters (e.g. Ollama) that don't.
+        usage: option<token-usage>,
+        /// Vector dimensionality — the length of every inner list in
+        /// `embeddings`. Lets callers size storage before iterating.
+        dims: u32,
+    }
+
+    /// Embed a batch of strings. No streaming sibling (unlike chat) —
+    /// embeddings return as one aggregated batch.
+    ///
+    /// Mirrors chat's `result<_, string>` at the umbrella boundary. The
+    /// retryable/permanent split lives in the Tier-2 adapter contract
+    /// (`wild:embed-adapter::embed-error`) + the host shim's retry
+    /// logic — exactly as chat's two-bucket `chat-error` does — and is
+    /// collapsed to a string message here so the `wild:ai/embed` surface
+    /// stays symmetric with `wild:ai/chat`.
+    embed: func(request: embed-request) -> result<embed-response, string>;
+}

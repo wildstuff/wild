@@ -1,0 +1,19 @@
+// `sticky-note` — the smallest complete Tier-2 WIDGET plugin world
+// (ADR-0173). Two lines:
+//
+//   - `include wild:plugin-meta/plugin-base@0.3.0;` — the meta lifecycle
+//     (`manifest` / `init` / `shutdown`) every Tier-2 plugin exports;
+//     `manifest()` is cross-checked against `sidecar.json` at load.
+//   - `export wild:ui/widget@0.1.0;` — the render surface: `describe()`
+//     advertises the widget kind, `render(view-json, data-json)` returns
+//     an HTML fragment the carrier places inside the view's card.
+//
+// A widget world imports NOTHING beyond the standard wasip2 runtime: no
+// secrets, no network, no messaging. The host hands it its view config
+// and (for a bound view) already-fetched data as JSON strings.
+package wildstuff:sticky-note@0.1.0;
+
+world sticky-note {
+    include wild:plugin-meta/plugin-base@0.3.0;
+    export wild:ui/widget@0.1.0;
+}

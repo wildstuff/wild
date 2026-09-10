@@ -1,0 +1,6 @@
+# Auto-intake: columns map 1:1 onto the `recipe` type's fields.
+# Optional fields not present here (ingredients, instructions, min_age, max_age)
+# are simply left unset on the seed rows; the chief fills them via record_recipe.
+target_type: recipe
+key: [recipe_id]
+columns: [recipe_id, name, servings, kcal_per_serving, protein_g, carbs_g, fat_g, meal, goal_type, gender_suitability, source_url, recorded_on]

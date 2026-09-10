@@ -1,0 +1,150 @@
+# ADR-0156 PR2 — the worked-example DOMAIN PACKAGE: contract management, with
+# a full German reading (ADR-0155). This is the SECOND domain (after the
+# liquidity tribe), so the adaptation walk's domain-blindness is proven, not
+# asserted. Everything below deserializes into the existing closed serde types
+# and compiles with the UNMODIFIED `wild-ddd` compiler — the D1 "declarations,
+# never code" criterion, pinned by `wild_tribe_ops::domain_package` tests.
+#
+# The reading is deliberately GERMAN (display names, labels, button text) —
+# the package's primary locale; slugs stay ASCII snake_case (the subject/tool
+# welding rule), umlauts live only in the reading marks.
+
+context: vertragsverwaltung
+
+value_objects:
+  - name: money_amount
+    base: decimal
+    unit: EUR
+    description: A monetary amount in EUR
+    openness: open
+  # PR-γ showcase — the VALUE is PII, so the mask is declared ONCE here and
+  # every conforming field inherits it (never on an identity-key field).
+  - name: iban
+    base: text
+    constraint: iban
+    description: An IBAN account identifier (mod-97 checksum-validated)
+    openness: closed
+    sensitive: true
+
+  - name: email_address
+    base: text
+    constraint: email
+    description: A contact e-mail address (structurally validated on every write)
+    openness: closed
+    sensitive: true
+
+value_sets:
+  # OPEN by design: a new contract kind appears without a code change (a
+  # publisher update or the operator's own widening).
+  - name: vertragsart
+    values: [miete, leasing, wartung, versicherung, sonstige]
+    openness: open
+    rationale: new contract kinds appear with the business, not with releases
+
+aggregates:
+  - name: vertragspartner
+    display_name: Vertragspartner
+    plural: Vertragspartner
+    title_key: name
+    icon: partner
+    color: blue
+    category: Verträge/Partner
+    description: The counterparty a contract is held with.
+    identity:
+      key: [partner_id]
+    mirror:
+      - { name: partner_id, type: text, required: true, label: "Partner-Nr." }
+      - { name: name, type: text, required: true, salience: summary, label: "Name" }
+      - { name: anschrift, type: text, label: "Anschrift" }
+      # Conforms to the SENSITIVE iban VO — masked on every read path by
+      # construction (PR-γ), and deliberately NOT a key field.
+      - { name: bankverbindung, type: text, vo: iban, role: identifies, label: "Bankverbindung (IBAN)" }
+      - { name: email, type: text, vo: email_address, label: "E-Mail" }
+
+  - name: vertrag
+    display_name: Vertrag
+    plural: Verträge
+    title_key: vertragsnummer
+    icon: document
+    color: teal
+    category: Verträge/Bestand
+    description: A running contract with a partner — term, notice period, fee.
+    identity:
+      key: [vertragsnummer]
+    mirror:
+      - { name: vertragsnummer, type: text, required: true, salience: summary, label: "Vertragsnummer" }
+      - { name: partner_id, type: text, required: true, label: "Partner" }
+      - { name: vertragsart, type: enum, value_set: vertragsart, label: "Vertragsart" }
+      - { name: beginn, type: date, required: true, salience: summary, label: "Beginn" }
+      - { name: laufzeit_monate, type: integer, label: "Laufzeit (Monate)" }
+      - { name: kuendigungsfrist_monate, type: integer, salience: summary, label: "Kündigungsfrist (Monate)" }
+      - { name: jahresentgelt, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", salience: summary, label: "Jahresentgelt" }
+    state:
+      # Operator-only working notes — enforced read-masking (ADR-0155).
+      - { name: notizen, type: text, internal: true, label: "Interne Notizen" }
+    lifecycle:
+      field: status
+      states: [aktiv, gekuendigt, beendet]
+      transitions:
+        - { command: kuendigen, from: aktiv, to: gekuendigt }
+        - { command: beenden, from: gekuendigt, to: beendet }
+    relations:
+      - { name: partner, target: vertragspartner, via_field: partner_id }
+    commands:
+      # Authored button text (ADR-0155 PR-β) — every surface renders the
+      # operator's words, never the humanised slug.
+      - name: kuendigen
+        label: "Vertrag kündigen"
+        description: Give notice on an active contract (records the state change; sends nothing).
+        risk: medium
+        inputs: [vertragsnummer]
+      - name: beenden
+        label: "Vertrag beenden"
+        description: Close out a terminated contract at the end of its term.
+        inputs: [vertragsnummer]
+
+projections:
+  - name: vertragsbestand
+    context: analytics
+    display_name: Vertragsbestand
+    plural: Vertragsbestände
+    description: >-
+      The running portfolio by contract kind — how many active contracts and
+      what annual fee volume each kind carries.
+    icon: chart
+    color: indigo
+    category: Verträge/Auswertung
+    key: [vertragsart]
+    fields:
+      - { name: vertragsart, type: text, label: "Vertragsart", description: The contract kind this row rolls up. }
+      - { name: jahresentgelt_summe, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", salience: summary, label: "Jahresentgelt (Summe)", description: Σ annual fee over the kind's active contracts. }
+      - { name: anzahl_aktiv, type: integer, salience: summary, label: "Aktive Verträge", description: Count of the kind's active contracts. }
+    grouped:
+      source: vertrag
+      group_by: vertragsart
+      measures:
+        - name: jahresentgelt_summe
+          op: sum
+          field: jahresentgelt
+          filter:
+            - { field: status, op: eq, value: aktiv }
+        - name: anzahl_aktiv
+          op: count
+          filter:
+            - { field: status, op: eq, value: aktiv }
+
+sources:
+  # ADR-0156 OQ6 — the package ships its sources as UNBOUND templates: the
+  # SHAPE travels (target type, columns), the origin deliberately does not.
+  # The adaptation walk shows each as "waiting for your folder/connection";
+  # binding = fill the locator, drop the mark.
+  - slug: vertraege-sample
+    locator: ""
+    unbound: true
+    target_type: vertrag
+    columns: [vertragsnummer, partner_id, vertragsart, beginn, laufzeit_monate, kuendigungsfrist_monate, jahresentgelt]
+  - slug: partner-sample
+    locator: ""
+    unbound: true
+    target_type: vertragspartner
+    columns: [partner_id, name, anschrift, bankverbindung, email]

@@ -1,0 +1,41 @@
+# DDD constitution for fixture 06 — the document connector extraction walk.
+# One aggregate (`supplier_invoice`) and one DOCUMENT source bound to it.
+# The default source fold compiles to [ingest, extract, ingest-candidates];
+# no explicit `processes:` section is needed.
+context: supplier_invoices
+
+aggregates:
+  - name: supplier_invoice
+    display_name: Supplier Invoice
+    plural: Supplier Invoices
+    description: >-
+      An inbound supplier invoice extracted from a scanned PDF. Kept as a
+      mirror-like ledger: the source documents are the canonical originals.
+    title_key: invoice_id
+    identity:
+      key: [invoice_id]
+    state:
+      - { name: invoice_id, type: text, required: true, description: The supplier's invoice number }
+      - { name: supplier, type: text, required: true, description: Supplier name }
+      - { name: amount, type: text, required: true, description: Invoice amount as text }
+      - { name: direction, type: text, required: true, description: inbound or outbound }
+
+sources:
+  - slug: invoice-scans
+    name: Eingangsscan-Rechnungen
+    locator: inbox/invoice-scans
+    target_type: supplier_invoice
+    trigger:
+      - { kind: interval, seconds: 3600 }
+    filter:
+      include_ext: [pdf]
+    constants:
+      - { field: direction, value: inbound, ty: text }
+    extractor:
+      mechanism: llm-extractor
+      trust: deterministic
+      max_concurrent: 4
+      tuning:
+        custom_instruction: >-
+          Fixture-only stand-in: extract one record per PDF with fields
+          invoice_id, supplier, amount, direction.

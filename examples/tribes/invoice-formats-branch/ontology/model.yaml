@@ -1,0 +1,82 @@
+# DDD constitution for fixture 07 — per-format branch routing.
+# One aggregate, one DOCUMENT source that accepts PDF + TXT, and a `processes:`
+# flow with a `check` router + two `does: extract` branches.
+context: supplier_invoices
+
+aggregates:
+  - name: supplier_invoice
+    display_name: Supplier Invoice
+    plural: Supplier Invoices
+    description: >-
+      An inbound supplier invoice extracted from a scanned PDF or a plain-text
+      file. Kept as a mirror-like ledger: the source documents are the canonical
+      originals.
+    title_key: invoice_id
+    identity:
+      key: [invoice_id]
+    state:
+      - { name: invoice_id, type: text, required: true, description: The supplier's invoice number }
+      - { name: supplier, type: text, required: true, description: Supplier name }
+      - { name: amount, type: text, required: true, description: Invoice amount as text }
+      - { name: direction, type: text, required: true, description: inbound or outbound }
+      - { name: tuning_hint, type: text, required: false, description: The per-format custom instruction that reached dispatch }
+
+sources:
+  - slug: invoice-formats
+    name: Invoice Formats
+    locator: inbox/invoice-formats
+    target_type: supplier_invoice
+    trigger:
+      - { kind: interval, seconds: 3600 }
+    filter:
+      include_ext: [pdf, txt]
+    constants:
+      - { field: direction, value: inbound, ty: text }
+    extractor:
+      mechanism: llm-extractor
+      trust: deterministic
+      max_concurrent: 4
+      tuning:
+        custom_instruction: >-
+          Source-level fallback instruction (fixture 07 never uses this because
+          every file is routed to a per-format branch).
+
+processes:
+  - slug: invoice-formats
+    name: Invoice Formats Branch Router
+    on:
+      source: invoice-formats
+    steps:
+      - id: route
+        does: check
+        # Route each per-file item by its stamped format token.
+      - id: extract-pdf
+        does: extract
+        config:
+          custom_instruction: PDF branch instruction reached dispatch
+      - id: extract-text
+        does: extract
+        config:
+          custom_instruction: Text branch instruction reached dispatch
+      - id: ingest-candidates
+        does: file
+        using: ingest-candidates
+    flow:
+      # The source process extends the folder source, so the compiled pipeline
+      # prepends an `ingest` Sink-Data stage before the authored steps. The
+      # first edge must bridge `ingest` -> the first authored step (`route`).
+      - from: ingest
+        to: route
+      - from: route
+        to: extract-pdf
+        when: "format == 'pdf'"
+      - from: route
+        to: extract-text
+        when: "format == 'text'"
+      - from: route
+        to: "stop: unsupported format"
+        otherwise: true
+      - from: extract-pdf
+        to: ingest-candidates
+      - from: extract-text
+        to: ingest-candidates
