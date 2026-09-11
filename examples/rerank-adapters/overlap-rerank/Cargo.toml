@@ -1,0 +1,57 @@
+# Deterministic teaching adapter for `wild:rerank-adapter@0.1.0` — the
+# copy-paste starting point for a Tier-2 rerank-adapter component. No
+# network, no secrets, no model: relevance is a term-overlap (Jaccard)
+# score between query and document tokens, so the retrieve → rerank
+# second stage can be exercised end-to-end without any cross-encoder.
+#
+# Standalone — explicitly NOT a member of the wild workspace (the
+# wasm32-wasip2 target would otherwise pull host-target deps into the
+# embedded host's build). Empty `[workspace]` table tells cargo this
+# manifest defines its own (single-member) workspace.
+
+[workspace]
+
+[package]
+name         = "overlap-rerank"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.97.0"
+license      = "Apache-2.0"
+repository   = "https://github.com/wildstuff/the-wild"
+description  = "Deterministic term-overlap reranker teaching the wild:rerank-adapter@0.1.0 Tier-2 contract — no network, no secrets, no model"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Same pin as the shipping adapters. This sample's exports are all
+# synchronous, but the shared pin keeps the sample byte-compatible with
+# the sibling examples and the `wit/http` package it references (whose
+# streaming half uses component-model-async syntax).
+wit-bindgen = { version = "=0.58.0", features = ["async-spawn"] }
+
+# Wasm components are single-threaded; no tokio.
+
+[package.metadata.component]
+package = "wildstuff:overlap-rerank"
+
+[package.metadata.component.target]
+path  = "wit"
+world = "overlap-rerank"
+
+# WIT-package deps for the world's imports + exports. Path deps straight
+# at the canonical text-WIT under `wit/<pkg>/`. The wit-bindgen macro
+# ALSO reads `wit/deps/<name>/` next to `wit/world.wit` (checked-in
+# symlinks resolving to the same files), so both surfaces have to
+# agree — see ./wit/deps/.
+[package.metadata.component.target.dependencies]
+"wild:plugin-meta"    = { path = "../../../wit/plugin-meta/plugin-meta.wit" }
+"wild:rerank-adapter" = { path = "../../../wit/rerank-adapter" }
+"wild:secrets"        = { path = "../../../wit/secrets/secrets.wit" }
+"wild:http"           = { path = "../../../wit/http/http.wit" }
+
+[profile.release]
+opt-level     = "z"
+lto           = true
+strip         = true
+codegen-units = 1

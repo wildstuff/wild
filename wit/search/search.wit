@@ -1,0 +1,134 @@
+// WILD Search Interface — pluggable Tier-3 full-text search.
+//
+// ADR-0026 §3, Phase F6 + ADR-0089. Host-side filesystem walks cover Tiers
+// 1 (title prefix-match on `tribes/*/meta.yaml`) and 2 (Rust-side
+// grep on `tribes/*/blueprint.md`). Tier 3 — the FTS / fuzzy / vector
+// stage — lives behind this WIT and ships as a Tier-1.5 plugin
+// (default kitchen-sink, Cargo-feature gated). Pulling it out of
+// the host removes the binary-bloat tax of a Rust-native FTS
+// crate and lets operators swap backends (inverted index, fuzzy,
+// embedding-driven) without forking core.
+//
+// Backend choice (V1): hand-rolled inverted index. `tantivy` is
+// excluded — it relies on memory-mapping + FFI that don't compile
+// to wasm32. Candidate alternatives for swap-in: `nucleo` (fuzzy)
+// or `simsearch` (trigram). The WIT contract stays stable; the
+// plugin's `query` impl is the swappable surface.
+//
+// ADR §3 sketch's `reindex` took no args. F6 lands with an
+// explicit `corpus` arg so the plugin doesn't need filesystem
+// access to `<profile_root>/ideas/` — the host reads spine.md
+// files (it's already walking them for Tier 2) and passes the
+// corpus inline. Keeping plugin storage out of the contract for
+// V1 makes the plugin trivially portable across hosts and avoids
+// a circular dependency with the F5 `wild:plugin-storage` WIT.
+// V0.2 adds the document-corpus surface for ADR-0089 blob indexing.
+
+package wild:search@0.2.0;
+
+interface index {
+
+    /// Operator-issued query. Returns ranked hits scoped to idea
+    /// spines for V1; later versions may extend the scope
+    /// (decisions, traces) via a typed `corpus` arg.
+    query: func(q: string, limit: u32) -> result<list<hit>, search-error>;
+
+    /// Force a full rebuild from the supplied corpus. The host
+    /// calls this on plugin install, on operator
+    /// `wild search reindex`, and (V1 simplification) before
+    /// every query that crosses the Tier-3 fall-through threshold.
+    /// Plugins that hold persistent index state across calls
+    /// MAY skip the rebuild when `spines` matches the previous
+    /// arg verbatim.
+    reindex: func(spines: list<spine-entry>) -> result<_, search-error>;
+
+    /// Per-idea corpus entry passed to `reindex`. `path` is the
+    /// profile-root-relative path the host walked
+    /// (e.g. `"ideas/ID-d248a541bc7e/spine.md"`); `body` is the
+    /// raw file contents.
+    record spine-entry {
+        path: string,
+        body: string,
+    }
+
+    record hit {
+        /// Profile-root-relative path of the matched idea spine
+        /// (e.g. `"ideas/ID-d248a541bc7e/spine.md"`). Same shape
+        /// the host's Tier 1+2 walks emit, so callers can render
+        /// a unified result list.
+        path: string,
+        /// Higher = better. Backend-defined; the host only sorts
+        /// descending and trims to the requested `limit`.
+        score: f32,
+        /// First ~80 chars around the strongest match. Operators
+        /// see this in `wild search query` output.
+        snippet: string,
+    }
+
+    variant search-error {
+        /// `query` was called before any successful `reindex` —
+        /// the plugin has no corpus to search.
+        index-stale,
+        /// Unrecoverable backend failure (parser bug, allocation
+        /// error). Carries the cause string for the host log.
+        io(string),
+    }
+}
+
+/// ADR-0089 — document/blob corpus surface. Atlas records whose
+/// source declares `index_corpora` (or whose type declares
+/// `search_corpus`) are converted to `document-entry` records and
+/// indexed here. `record_ref` keeps every hit anchored to the
+/// canonical Atlas record for RBAC and provenance.
+interface documents {
+
+    /// Add or update a batch of documents in the indexed corpora.
+    /// The plugin decides persistence; calls are idempotent by
+    /// `record_ref`.
+    reindex-documents: func(docs: list<document-entry>) -> result<_, search-error>;
+
+    /// Query the document corpora.
+    search-documents: func(query: string, opts: search-options) -> result<list<search-hit>, search-error>;
+
+    record searchable-field {
+        name: string,
+        value: string,
+        boost: f32,
+    }
+
+    record document-entry {
+        corpus: string,
+        record-ref: string,
+        blob-ref: option<string>,
+        title: string,
+        headings: list<string>,
+        body: string,
+        fields: list<searchable-field>,
+    }
+
+    record search-hit {
+        record-ref: string,
+        score: f32,
+        snippet: option<string>,
+    }
+
+    record search-options {
+        corpora: list<string>,
+        type-filter: option<string>,
+        limit: u32,
+        offset: u32,
+    }
+
+    variant search-error {
+        index-stale,
+        io(string),
+    }
+}
+
+/// `search-host` — the world a component imports to consume the
+/// search surface. Mirrors the `*-host` shape of every other
+/// wild plugin world.
+world search-host {
+    import index;
+    import documents;
+}

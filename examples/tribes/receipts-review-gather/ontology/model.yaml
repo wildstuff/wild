@@ -1,0 +1,69 @@
+# The constitution of the receipts-review-gather fixture tribe (ADR-0108 DDD
+# lane). One mirrored aggregate, one folder source, one source process — the
+# smallest model that exercises an AGENTIC stage (`does: review`) inside a
+# per-file fan-out child, followed by the ADR-0128 gather barrier and a single
+# ADR-0125 `notify-operator` notice.
+context: receipts
+
+aggregates:
+  # source_mirror: the receipt ledger — ingest-owned, never hand-edited.
+  - name: receipt
+    display_name: Receipt
+    plural: Receipts
+    description: >-
+      One expense receipt as delivered into the receipts folder — mirrored
+      from the CSV drop, never hand-edited.
+    title_key: receipt_id
+    identity:
+      key: [receipt_id]
+    mirror:
+      - { name: receipt_id, type: text, required: true, description: The receipt's document number }
+      - { name: vendor, type: text, description: Who issued the receipt }
+      - { name: amount, type: decimal, description: "Gross amount in EUR (a real receipt export carries decimal euros, e.g. 12.50 — not integer cents)" }
+
+sources:
+  # A folder feed on the born-with defaults (folder connector + csv adapter).
+  # The interval trigger only ARMS the source — the e2e drives each pull
+  # deterministically via the `intake_sync` operator verb, so the window is
+  # deliberately wide (nothing fires on its own mid-test).
+  - slug: receipts-inbound
+    name: Belegeingang
+    locator: inbox/receipts
+    target_type: receipt
+    trigger:
+      - { kind: interval, seconds: 3600 }
+    columns: [receipt_id, vendor, amount]
+    # The mapping is DECLARED (not shape-learned): per-file fan-out children
+    # run concurrently, and a mapping-less source would race the first-batch
+    # shape learning across them.
+    mapping:
+      - { column: receipt_id, field: receipt_id, ty: text }
+      - { column: vendor, field: vendor, ty: text }
+      - { column: amount, field: amount, ty: decimal }
+
+processes:
+  # The agentic gather flow: the source process EXTENDS its folder source
+  # (same slug — the takeover). Each per-file child runs an agentic `review`
+  # step (dispatched to `receipt-review-worker`, which pauses and resumes over
+  # the bus) before arriving at the `gather` barrier. The LAST arrival folds
+  # the per-file results into ONE item — and ONE operator notice for the batch.
+  - slug: receipts-inbound
+    name: Belegeingang geprüft und gesammelt
+    description: >-
+      When the receipts folder is pulled, review each file with a worker,
+      gather the per-file results, and tell the operator once how the batch went.
+    on: { source: receipts-inbound }
+    steps:
+      - { id: review, does: review, using: receipt-review-worker }
+      - { id: gather, does: gather }
+      - id: announce
+        does: notify
+        using: notify-operator
+        config:
+          severity: info
+          title: "Receipts folder processed"
+          body: "{{ arrived }} of {{ expected }} file(s) processed."
+    flow:
+      - { from: ingest, to: review }
+      - { from: review, to: gather }
+      - { from: gather, to: announce }
