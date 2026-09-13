@@ -1,0 +1,38 @@
+# Standalone ADR-0141 PR1 existence proof — NOT a member of the host workspace.
+# Built as a wasm32-wasip2 component so the embedded host can load it as a
+# Tier-2 plugin.
+[workspace]
+
+[package]
+name         = "sharepoint-connector"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.97.0"
+license      = "Apache-2.0"
+repository   = "https://github.com/wildstuff/the-wild"
+description  = "ADR-0141 PR1 SharePoint connector exercising all four installable compute primitives"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "=0.58.0", features = ["async-spawn"] }
+
+# Wasm components are single-threaded; no tokio.
+
+[package.metadata.component]
+package = "wildstuff:sharepoint-connector"
+
+[package.metadata.component.target]
+path  = "wit"
+world = "sharepoint-connector"
+
+# Canonical-source WIT deps under the monorepo `wit/` tree.
+[package.metadata.component.target.dependencies]
+"wild:plugin-meta"   = { path = "../../../wit/plugin-meta/plugin-meta.wit" }
+"wild:tool-provider" = { path = "../../../wit/tool-provider/tool-provider.wit" }
+"wild:worker"        = { path = "../../../wit/worker/worker.wit" }
+"wild:function"      = { path = "../../../wit/function/function.wit" }
+"wild:secrets"       = { path = "../../../wit/secrets/secrets.wit" }
+"wild:messaging"     = { path = "../../../wit/messaging/messaging.wit" }
+"wasi:http"          = { path = "../../../wit/external/wasi-http-0.2.0.wasm" }

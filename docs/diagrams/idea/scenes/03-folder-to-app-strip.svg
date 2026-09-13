@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="648" viewBox="0 0 1000 648" font-family="'Chalkboard SE','Comic Sans MS','Segoe Print',sans-serif">
+  <defs>
+    <marker id="s" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#2f9e6b"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="648" rx="18" fill="#fbfaf7"/>
+  <text x="500" y="46" text-anchor="middle" font-size="27" font-weight="bold" fill="#1f2933">From a folder to an app</text>
+  <text x="500" y="72" text-anchor="middle" font-size="15" fill="#6b7480">you hand a topic over — the Tribe builds the rest</text>
+
+  <!-- ================= 1 — point at a folder ================= -->
+  <rect x="30" y="112" width="300" height="236" rx="14" fill="#ffffff" stroke="#d8d3c8" stroke-width="2"/>
+  <circle cx="56" cy="138" r="13" fill="#2f9e6b"/>
+  <text x="56" y="143" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">1</text>
+  <g fill="#ffffff" stroke="#5b7c99" stroke-width="2">
+    <rect x="122" y="176" width="96" height="14" rx="4"/>
+    <rect x="132" y="166" width="76" height="14" rx="4"/>
+  </g>
+  <path d="M116,186 h44 l10,-12 h60 a7,7 0 0 1 7,7 v62 a7,7 0 0 1 -7,7 h-114 a7,7 0 0 1 -7,-7 v-62 a7,7 0 0 1 7,-7 z" fill="#eef2f5" stroke="#5b7c99" stroke-width="2"/>
+  <path d="M214,236 l0,26 l7,-7 l6,12 l7,-4 l-6,-11 l9,-2 z" fill="#1f2933"/>
+  <text x="52" y="290" font-size="13.5" font-weight="bold" fill="#1f2933">You point at a folder.</text>
+  <text x="52" y="310" font-size="12" fill="#6b7480">Invoices, letters, contracts.</text>
+
+  <!-- ================= 2 — Elder asks ================= -->
+  <rect x="350" y="112" width="300" height="236" rx="14" fill="#ffffff" stroke="#d8d3c8" stroke-width="2"/>
+  <circle cx="376" cy="138" r="13" fill="#2f9e6b"/>
+  <text x="376" y="143" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">2</text>
+  <circle cx="404" cy="212" r="16" fill="#bfe6d2" stroke="#2f9e6b" stroke-width="2"/>
+  <path d="M384,248 a20,20 0 0 1 40,0" fill="#bfe6d2" stroke="#2f9e6b" stroke-width="2"/>
+  <text x="404" y="268" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#2f9e6b">Elder</text>
+  <rect x="440" y="168" width="184" height="86" rx="13" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2"/>
+  <path d="M440,214 L426,222 L440,230 Z" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2" stroke-linejoin="round"/>
+  <g font-size="12.5" fill="#1f2933">
+    <text x="458" y="194">due dates?</text>
+    <text x="458" y="216">notice periods?</text>
+    <text x="458" y="238">who may see them?</text>
+  </g>
+  <text x="372" y="290" font-size="13.5" font-weight="bold" fill="#1f2933">Elder asks what matters.</text>
+  <text x="372" y="310" font-size="12" fill="#6b7480">A few questions — then it raises</text>
+  <text x="372" y="328" font-size="12" fill="#6b7480">a Tribe for the topic.</text>
+
+  <!-- ================= 3 — Atlas pins the ontology ================= -->
+  <rect x="670" y="112" width="300" height="236" rx="14" fill="#ffffff" stroke="#d8d3c8" stroke-width="2"/>
+  <circle cx="696" cy="138" r="13" fill="#2f9e6b"/>
+  <text x="696" y="143" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">3</text>
+  <g stroke="#2f9e6b" stroke-width="1.8">
+    <line x1="820" y1="196" x2="762" y2="240"/>
+    <line x1="820" y1="196" x2="878" y2="240"/>
+  </g>
+  <g fill="#edf7f1" stroke="#2f9e6b" stroke-width="2">
+    <rect x="766" y="176" width="108" height="34" rx="11"/>
+    <rect x="704" y="228" width="108" height="34" rx="11"/>
+    <rect x="828" y="228" width="108" height="34" rx="11"/>
+  </g>
+  <g font-size="12.5" font-weight="bold" fill="#1f2933" text-anchor="middle">
+    <text x="820" y="198">Partner</text>
+    <text x="758" y="250">Contract</text>
+    <text x="882" y="250">Invoice</text>
+  </g>
+  <text x="692" y="290" font-size="13.5" font-weight="bold" fill="#1f2933">It learns what your things are.</text>
+  <text x="692" y="310" font-size="12" fill="#6b7480">Your things, and how they</text>
+  <text x="692" y="328" font-size="12" fill="#6b7480">belong together — built once.</text>
+
+  <!-- ================= 4 — two sources, one thing ================= -->
+  <rect x="30" y="372" width="300" height="236" rx="14" fill="#ffffff" stroke="#d8d3c8" stroke-width="2"/>
+  <circle cx="56" cy="398" r="13" fill="#2f9e6b"/>
+  <text x="56" y="403" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">4</text>
+  <path d="M64,438 h22 l6,-8 h30 a5,5 0 0 1 5,5 v36 a5,5 0 0 1 -5,5 h-58 a5,5 0 0 1 -5,-5 v-33 a5,5 0 0 1 5,-5 z" fill="#eef2f5" stroke="#5b7c99" stroke-width="2"/>
+  <text x="93" y="500" text-anchor="middle" font-size="10.5" fill="#6b7480">folder</text>
+  <rect x="238" y="434" width="60" height="42" rx="6" fill="#eef2f5" stroke="#5b7c99" stroke-width="2"/>
+  <path d="M238,438 L268,462 L298,438" fill="none" stroke="#5b7c99" stroke-width="2"/>
+  <text x="268" y="500" text-anchor="middle" font-size="10.5" fill="#6b7480">mailbox</text>
+  <rect x="126" y="518" width="110" height="34" rx="11" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2.5"/>
+  <text x="181" y="540" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1f2933">Partner</text>
+  <g fill="none" stroke="#2f9e6b" stroke-width="1.8" marker-end="url(#s)">
+    <path d="M129,466 C152,478 148,500 152,512"/>
+    <path d="M233,466 C210,478 214,500 210,512"/>
+  </g>
+  <text x="52" y="582" font-size="13.5" font-weight="bold" fill="#1f2933">Two sources, one thing.</text>
+  <text x="52" y="602" font-size="12" fill="#6b7480">Both receipts kept.</text>
+
+  <!-- ================= 5 — the Forge ================= -->
+  <rect x="350" y="372" width="300" height="236" rx="14" fill="#ffffff" stroke="#d8d3c8" stroke-width="2"/>
+  <circle cx="376" cy="398" r="13" fill="#2f9e6b"/>
+  <text x="376" y="403" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">5</text>
+  <path d="M418,472 h74 l-10,16 h-54 z" fill="#9aa4af" stroke="#1f2933" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M436,488 h38 v12 l12,20 h-62 l12,-20 z" fill="#9aa4af" stroke="#1f2933" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M492,472 h22 l-8,8 h-14 z" fill="#9aa4af" stroke="#1f2933" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#e08a2b" stroke-width="2.5" stroke-linecap="round">
+    <line x1="454" y1="452" x2="454" y2="440"/>
+    <line x1="432" y1="458" x2="424" y2="448"/>
+    <line x1="478" y1="458" x2="486" y2="448"/>
+  </g>
+  <circle cx="454" cy="462" r="5" fill="#e0b341"/>
+  <rect x="524" y="466" width="100" height="30" rx="10" fill="#ffffff" stroke="#e08a2b" stroke-width="2"/>
+  <text x="574" y="486" text-anchor="middle" font-size="12" font-weight="bold" fill="#1f2933">parser</text>
+  <text x="574" y="516" text-anchor="middle" font-size="11" font-style="italic" fill="#e08a2b">✦ new tool</text>
+  <path d="M498,494 L516,486" fill="none" stroke="#e08a2b" stroke-width="1.8"/>
+  <text x="372" y="582" font-size="13.5" font-weight="bold" fill="#1f2933">It builds the missing tool.</text>
+  <text x="372" y="602" font-size="12" fill="#6b7480">Real code — no model in the loop.</text>
+
+  <!-- ================= 6 — the app ================= -->
+  <rect x="670" y="372" width="300" height="236" rx="14" fill="#ffffff" stroke="#d8d3c8" stroke-width="2"/>
+  <circle cx="696" cy="398" r="13" fill="#2f9e6b"/>
+  <text x="696" y="403" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">6</text>
+  <rect x="782" y="424" width="76" height="126" rx="12" fill="#ffffff" stroke="#1f2933" stroke-width="2.5"/>
+  <rect x="790" y="440" width="60" height="94" rx="5" fill="#edf7f1" stroke="#2f9e6b" stroke-width="1.6"/>
+  <g fill="#bfe6d2">
+    <rect x="798" y="450" width="44" height="7" rx="3.5"/>
+    <rect x="798" y="466" width="44" height="7" rx="3.5"/>
+    <rect x="798" y="482" width="44" height="7" rx="3.5"/>
+  </g>
+  <circle cx="820" cy="512" r="12" fill="#2f9e6b"/>
+  <path d="M814,512 l4,5 l8,-10" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="882" y="470" font-size="11" fill="#6b7480">on their</text>
+  <text x="882" y="486" font-size="11" fill="#6b7480">phone</text>
+  <text x="692" y="582" font-size="13.5" font-weight="bold" fill="#1f2933">Your partner opens the app.</text>
+  <text x="692" y="602" font-size="12" fill="#6b7480">Nobody wrote code.</text>
+
+  <text x="500" y="632" text-anchor="middle" font-size="13" font-style="italic" fill="#1f2933">Not software you rent — a system you raised, and everything it built is yours.</text>
+</svg>

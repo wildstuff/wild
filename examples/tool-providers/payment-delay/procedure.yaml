@@ -1,0 +1,93 @@
+# ADR-0202 D4 — the model manifest for the `payment_delay` Procedure.
+#
+# The audit card. Every number here is measured, not claimed: the tests in
+# `src/procedure.rs` re-derive `parameters` and `holdout.score` from the training
+# extract this file names, and fail if either drifts. D7.2 asks that an
+# auditor be able to re-check a Procedure with a spreadsheet — that is what
+# makes this a record rather than a story.
+#
+# `expected_delay_days` under each debtor is the one DERIVED entry: the
+# component computes it from `n`, `own_mean_days` and `pooled_mean_delay_days`
+# rather than reading it, so the card and the binary cannot drift into two
+# different answers. It is written out anyway because the card is what an
+# accountant is handed, and "shrink 4.0819 toward 3.3132 with weight 171/181"
+# is not a number.
+#
+# At runtime this rides `forge.meta.json` → `ForgeBuildCompleteEvent` →
+# `ComponentTypeYaml.model` (ADR-0202 D10.2). It is kept here beside the
+# source because that workspace file is written by the host, never
+# committed — this is the authored half a re-forge starts from.
+---
+slug: payment_delay
+version: v1
+method: >-
+  Per-debtor payment-delay model over settled receivables. Each debtor gets
+  one mean: the average number of days between an invoice's due date and the
+  day it was actually paid, over the training window. That mean is SHRUNK
+  toward the pooled mean of all debtors with weight n / (n + 10), so a debtor
+  seen fifteen times is pulled most of the way back to the house average
+  while one seen a hundred and seventy times is trusted on its own. The
+  expected settlement date is the due date plus the shrunk delay, rounded to
+  whole calendar days. A partner absent from the training window is answered
+  with the pooled mean and the row says `no_history`. No trend term, no
+  seasonality, no invoice-size term, and no weekend or holiday snapping —
+  the fit is deliberately the simplest thing that separates one debtor from
+  another, so it stays hand-checkable.
+parameters:
+  pooled_mean_delay_days: 3.3132
+  pooled_stdev_days: 5.6998
+  # A JUDGEMENT, not a fit: "ten settled invoices is when I start believing a
+  # debtor's own average". It is a parameter so it can be argued with.
+  shrinkage_k: 10
+  debtors:
+    BP-001:
+      n: 171
+      own_mean_days: 4.0819
+      observed_stdev_days: 1.7130
+      expected_delay_days: 4.0394
+    BP-002:
+      n: 171
+      own_mean_days: -2.0702
+      observed_stdev_days: 1.2299
+      expected_delay_days: -1.7728
+    BP-003:
+      n: 172
+      own_mean_days: 2.1047
+      observed_stdev_days: 1.7739
+      expected_delay_days: 2.1711
+    BP-004:
+      n: 172
+      own_mean_days: 11.6279
+      observed_stdev_days: 4.7537
+      expected_delay_days: 11.1710
+    BP-005:
+      n: 171
+      own_mean_days: 7.3743
+      observed_stdev_days: 2.9105
+      expected_delay_days: 7.1499
+    BP-006:
+      n: 172
+      own_mean_days: -2.9884
+      observed_stdev_days: 1.1945
+      expected_delay_days: -2.6422
+    BP-007:
+      n: 15
+      own_mean_days: 0.4000
+      observed_stdev_days: 2.1647
+      expected_delay_days: 1.5653
+holdout:
+  # Mean absolute error in DAYS over the final 12 weeks (72 settled
+  # receivables). The number that matters is the comparison, and it is
+  # measured in the same test: one pooled mean for every debtor scores
+  # 4.2987 days on the same holdout, so the per-debtor split more than halves
+  # the error. A score with no baseline beside it says nothing.
+  metric: mae_days
+  score: 1.9014
+  evaluated_at: 2026-08-12
+trained_on:
+  type: invoice
+  snapshot: settlements-2023-2026
+  as_of: 2026-04-27
+source_ref:
+  spec: examples/tool-providers/payment-delay
+  digest: sha256:4be469b05c477c52786a2fdf9abdb2729eb1304694b6ec36e0540cbd44f917f7

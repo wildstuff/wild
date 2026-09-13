@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 300" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#0b1220" flood-opacity="0.07"/>
+    </filter>
+  </defs>
+  <rect x="2" y="2" width="1096" height="296" rx="20" fill="#ffffff" stroke="#d0d7de"/>
+
+  <!-- timeline -->
+  <line x1="90" y1="120" x2="1010" y2="120" stroke="#e3e9f0" stroke-width="2"/>
+  <g fill="#b6c8dd">
+    <circle cx="140" cy="120" r="4"/>
+    <circle cx="340" cy="120" r="4"/>
+    <circle cx="540" cy="120" r="4"/>
+    <circle cx="740" cy="120" r="4"/>
+  </g>
+  <circle cx="940" cy="120" r="5" fill="#57606a"/>
+  <text x="140" y="98" text-anchor="middle" font-size="13" fill="#57606a">January</text>
+  <text x="340" y="98" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">February</text>
+  <text x="540" y="98" text-anchor="middle" font-size="13" fill="#57606a">March</text>
+  <text x="740" y="98" text-anchor="middle" font-size="13" fill="#57606a">…</text>
+  <text x="940" y="98" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">today</text>
+
+  <!-- highlight feb -->
+  <circle cx="340" cy="120" r="10" fill="none" stroke="#007aff" stroke-width="2"/>
+
+  <!-- you ask (from today) -->
+  <g filter="url(#soft)">
+    <rect x="700" y="170" width="330" height="52" rx="26" fill="#ffffff" stroke="#d0d7de"/>
+  </g>
+  <text x="724" y="201" font-size="14.5" font-weight="600" fill="#1f2328">“What was my balance in February?”</text>
+  <path d="M 760 168 C 600 152, 440 140, 356 126" stroke="#007aff" stroke-width="1.5" fill="none" stroke-dasharray="1 6" stroke-linecap="round"/>
+
+  <!-- the answer card at feb -->
+  <g filter="url(#soft)">
+    <rect x="120" y="164" width="400" height="86" rx="14" fill="#eef6ff" stroke="#c9ddf5"/>
+  </g>
+  <text x="144" y="194" font-size="14.5" font-weight="600" fill="#1f2328">Your February 28 truth</text>
+  <text x="144" y="216" font-size="13" fill="#57606a">balance · streak · the goal you had <tspan font-style="italic">then</tspan></text>
+  <text x="144" y="236" font-size="12" fill="#007aff">answered from records — not from memory</text>
+
+  <text x="550" y="278" text-anchor="middle" font-size="13" fill="#8c959f">Nothing is ever overwritten — corrections are added, so any day stays answerable.</text>
+</svg>

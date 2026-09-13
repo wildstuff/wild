@@ -1,0 +1,2774 @@
+# ADR-0108 — the DDD authoring source (`DomainModelDoc`) for the
+# liquidity-management reference tribe. THE CONSTITUTION of this tribe.
+#
+# This is the ACTIVE COMPILE source. `wild tribe apply` (with the manifest's
+# `authoring_method: ddd`) routes through `wild_ddd::compiler::compile`, which
+# lowers this single file — deterministically, no translation — into the full
+# DataCommand stream (`ontology/{shared-properties,functions,seeds,verbs,sources}`
+# equivalent) that the loader pins.
+#
+# The compile shape is not a promise, it is a GATE: the compiler tests in
+# `wild-ddd` compile THIS file and assert the emitted records (types + marks,
+# all 8 domain verbs, plus the function / shared-property / intake-source /
+# mapping / flow / process lanes) against committed goldens — so a compiler
+# regression reddens a test rather than shipping a broken tribe.
+#
+# The ADR-0082 presentation / template / security marks (icon · color · category
+# · title_key · display_name · plural · description · template_role · adapt_hint
+# · customer_visible · strict_validation, and the field-level format · category ·
+# sensitive) are AUTHORED INTENT the compiler cannot infer — carried literally so
+# the compiled type keeps the intended presentation.
+#
+# `context:` is the doc-level default Bounded-Context module; each aggregate /
+# projection below overrides it with its own `context:` so this single model
+# carries several C4 L2 modules (invoicing · payments · counterparties ·
+# treasury · analytics) the dashboard groups by. Unmarked elements inherit the
+# default.
+context: liquidity
+
+# ADR-0236 — what this tribe is FOR, and what it deliberately is not. Authored,
+# never derived: it is what a proposed change is judged against, so a purpose
+# read off the aggregates below could only ever agree with them. The non-goals
+# are the load-bearing half — the list above says what was built and can never
+# say what was ruled out.
+charter:
+  purpose: >
+    Wir behalten die Liquidität im Blick: welche Rechnungen offen sind, wann
+    Geld hereinkommt und wann es rausgeht — damit wir früh sehen, wenn es eng
+    wird.
+  non_goals:
+    # Every line below is checked against what this model actually declares.
+    # A non-goal the tribe already breaks is worse than none: it reads as a
+    # rule, is quoted like one, and the first change measured against it gets
+    # an answer nobody can act on.
+    - Wir überweisen kein Geld. Der Zahllauf baut die SEPA-Datei und legt sie
+      zum Signieren ins Banking-Portal — ausgelöst wird die Zahlung dort, von
+      einem Menschen.
+    - Wir leiten keine rechtlichen Schritte ein. Bei der letzten Mahnstufe ist
+      Schluss; Inkasso und Gericht sind ausdrücklich nicht unsere Sache.
+    - Wir buchen nichts. Wir führen kein Hauptbuch und keine Journale — die
+      Buchhaltung bleibt im Buchhaltungssystem.
+    - Wir entscheiden nicht, wer Kunde werden darf. Bonitätsauskünfte holen und
+      ablegen ja — daraus eine Freigabe oder Ablehnung machen nicht.
+
+value_objects:
+  - name: money_amount
+    base: decimal
+    unit: EUR
+    # The EUR minor unit: every conforming decimal field is rounded to 2
+    # fractional digits (half-away-from-zero, commercial rounding) in the fold, so a
+    # computed field never persists division noise (`7142.857142…` → `7142.86`).
+    scale: 2
+    description: A monetary amount in EUR
+    openness: open
+  - name: iban
+    base: text
+    constraint: iban
+    description: An IBAN account identifier (mod-97 checksum-validated)
+    openness: closed
+
+# ── ADR-0134 — the tribe's tunable policy. A setting is declared here only
+# when something READS it (ADR-0200 D3: a setting with no consumer is a lie):
+# `vat_rate` is read by the `vat_amount` function, the two risk cut-offs by
+# `partner_risk_band`. `min`/`max` are the guard rails the settings form
+# enforces — an operator cannot retune the VAT to 900 or invert the bands.
+settings:
+  - key: vat_rate
+    value: 19
+    type: int
+    min: 0
+    max: 100
+    unit: percent
+    mutable_by: operator
+    description: VAT rate applied when deriving net/VAT from a gross invoice amount.
+  - key: risk_band_low_max_days
+    value: 14
+    type: int
+    min: 1
+    max: 365
+    unit: days
+    mutable_by: operator
+    description: >-
+      A debtor granted this payment window or less counts as LOW receivables
+      risk. Raise it if your trade terms are generous by default.
+  - key: risk_band_medium_max_days
+    value: 30
+    type: int
+    min: 1
+    max: 365
+    unit: days
+    mutable_by: operator
+    description: >-
+      Above the low cut-off and up to this window is MEDIUM risk; anything
+      longer is HIGH. Must sit above `risk_band_low_max_days`.
+
+value_sets:
+  # A closed domain set (ADR-0108 §2): a new counterparty role is a code change,
+  # so a field referencing it inherits the `closed` call in the compiled ontology.
+  - name: partner_role
+    values: [debtor, creditor, both]
+    openness: closed
+
+functions:
+  - name: vat_amount
+    # ADR-0200 D3 — reads the operator-tunable `vat_rate` domain setting (not a
+    # hardcoded rate), so changing it in the tribe settings actually re-drives the
+    # VAT. `setting('vat_rate')` is provenance-captured at fold, so already-booked
+    # invoices keep the rate they were computed with. At vat_rate=19 this is
+    # byte-identical to the former `(amount * 19) / 119`.
+    expr: "(amount * setting('vat_rate')) / (100 + setting('vat_rate'))"
+    description: The VAT portion contained in a gross EUR amount, at the tribe's `vat_rate`.
+  - name: net_amount
+    # Reconciliation-safe: the net is the gross MINUS the
+    # already-rounded VAT, never an independent `gross × 100 ÷ 119` division.
+    # Because the fold rounds `vat_amount` to the cent before this reads it (topo
+    # order: net depends on vat_amount), `net_amount + vat_amount == amount`
+    # holds to the cent by construction — no stray ±0,01 € on the invoice.
+    expr: "amount - vat_amount"
+    description: The net (ex-VAT) portion of a gross EUR amount = gross − VAT (reconciles to the cent).
+  - name: gross_amount
+    expr: "(net * 119) / 100"
+    description: The gross (incl-VAT) amount from a net EUR amount = net × 119 ÷ 100.
+  - name: cash_discount_amount
+    expr: "(amount * cash_discount_percent) / 100"
+    description: The early-payment discount (cash discount) value = amount × cash_discount_percent ÷ 100.
+  - name: line_total
+    expr: "qty * price"
+    description: A line total = quantity × unit price.
+  - name: facility_utilisation
+    expr: "drawn / limit"
+    description: Overdraft-line utilisation as a 0..1 ratio = drawn ÷ limit (→1.0 = exhausted).
+  - name: partner_risk_band
+    expr: 'if(payment_terms_days <= setting(''risk_band_low_max_days''), "low", if(payment_terms_days <= setting(''risk_band_medium_max_days''), "medium", "high"))'
+    description: >-
+      Receivables-risk band (low / medium / high) from the partner's agreed payment
+      window. The two cut-offs are tribe SETTINGS, not literals: where a house
+      draws the line between a low- and a medium-risk debtor is policy the
+      operator retunes, not a fact the model owns (ADR-0134). Like `vat_amount`
+      above, the values are provenance-captured at fold, so already-enriched
+      partners keep the band they were assessed under. Filled at ingest via
+      enriched_by.
+  # ── ADR-0202 D5 — the one LEARNED function in this tribe.
+  #
+  # Not an expression and not a judgement: a fitted Procedure, bound through
+  # `wild:function/backing` rather than a tool slug.
+  #
+  # THE HORIZON IS A RECORD FIELD, and that is not a style choice. ADR-0202
+  # D10.6 offers two homes for it — "a `config` value (static) or a record
+  # field (per-run)" — and only ONE of them is wired: `FunctionDef.config` is
+  # read by the `llm-prompt` backing and by nothing else. The synthesized
+  # enrich trigger (`synthesize_enrich_triggers`) carries `inputs` + `outputs`
+  # and no config at all, so a `config: {horizon_days: 30}` here would never
+  # reach the component — which would then fall back to its OWN default of 30
+  # and produce a plausible number for a horizon nobody declared. It read as
+  # working because the two 30s agreed. The house rule is the one that
+  # applies: a declared config key that is never read is a lie (CLAUDE.md
+  # § Code discipline).
+  #
+  # As a field it also buys the thing this tribe actually needs: ONE run can
+  # write a whole weekly curve — 7, 14, … 91 days out — instead of the single
+  # point a static horizon allows.
+  #
+  # Effecting, so it runs at the BOUNDARY only: the estimate is a written
+  # fact. Recomputing it on every read would let a redeployed Procedure
+  # silently rewrite numbers already reported.
+  - name: cash_inflow_forecast
+    expr: ""
+    plugin_backing: { plugin: cash-forecast, name: cash_forecast }
+    side_effect_class: "effecting"
+    inputs: [as_of, horizon_days]
+    description: >-
+      Expected cash inflow at a horizon, from the fitted `cash-forecast`
+      Procedure (v4, holdout MAPE 0.0353). An ESTIMATE, not a booked figure —
+      distinct from the `cash_forecast` PROJECTION below, which sums open
+      invoices by due date. This one never looks at the book at all: it is an
+      INDEPENDENT estimate of the same quantity, drawn from seasonality alone,
+      which is what makes the two worth reading side by side.
+
+  # ── ADR-0202 D5 — the SECOND learned function, and the one that actually
+  # corrects the due-date assumption.
+  #
+  # `cash_forecast` (the projection) sums open invoices on the day they FALL
+  # DUE, and its own description admits what that assumes: "it assumes every
+  # debtor pays on the due date, which is exactly what the DSO and the dunning
+  # lane exist to correct". This Procedure is that correction, per invoice
+  # rather than in aggregate: it moves each receivable to the day the debtor
+  # is expected to actually pay it.
+  #
+  # It takes `partner_id` — the WHOLE point. A model that ignored it would
+  # produce the same offset for every invoice, which is the pooled assumption
+  # it replaces, and nothing in this file would fail to compile.
+  #
+  # Effecting, so it runs at the BOUNDARY only: the estimate is a written
+  # fact. Recomputing it on every read would let a redeployed Procedure
+  # silently rewrite dates already reported.
+  - name: settlement_delay_forecast
+    expr: ""
+    plugin_backing: { plugin: payment-delay, name: settlement_delay_forecast }
+    side_effect_class: "effecting"
+    inputs: [partner_id, due_date]
+    description: >-
+      When a receivable will actually settle, from the fitted `payment-delay`
+      Procedure (v1, holdout MAE 1.9014 days against 4.2987 for a single
+      pooled mean). An ESTIMATE, not a promise — the answer carries the spread it was
+      drawn from and says whether it rests on this debtor's own history
+      (`own_history`), on a blend where the history is thin (`blended`), or on
+      nothing but the pooled mean (`no_history`). Read the basis before
+      reporting the date.
+
+  # ── ADR-0202 D5 — the THIRD learned function, and the only one whose answer
+  # depends on something outside its own inputs.
+  #
+  # Its two siblings are functions of what you hand them: same inputs, same
+  # answer, for ever. This one is anchored to a market rate that arrived from
+  # the ECB on a particular morning, so the same invoice valued against
+  # yesterday's rate is a different number — correctly. That is why the row it
+  # writes stores BOTH the rate it used and the day that rate was quoted.
+  #
+  # THE RATE ARRIVES AS A FIELD, and that is not a modelling preference.
+  # ADR-0202 D10.3's import allow-list carries no `wasi:sockets`, no
+  # `wasi:http` and no `wild:http`, so a Procedure cannot fetch its own market
+  # data. The impure half is the `ecb-fx` source below. What reads like a
+  # limitation is what makes a stored valuation auditable three years later.
+  - name: fx_exposure_valuation
+    expr: ""
+    plugin_backing: { plugin: fx-exposure, name: fx_exposure_valuation }
+    side_effect_class: "effecting"
+    inputs: [currency, amount_foreign, rate_per_eur, rate_date, days_to_settlement]
+    description: >-
+      What a foreign-currency receivable is worth in euro by the time it
+      settles, from the fitted `fx-exposure` Procedure (v1, holdout band
+      coverage 0.7595 against a 0.80 target). An ESTIMATE and a BAND, never a
+      single figure — and it is only defined RELATIVE TO THE RATE SNAPSHOT it
+      is given, which the row records beside the answer. An unfitted currency
+      is refused rather than averaged.
+
+aggregates:
+  # ── source_mirror: the bank-transaction ledger — ground truth of cash movement.
+  - name: transaction
+    context: treasury
+    display_name: Bank Transaction
+    plural: Bank Transactions
+    description: >-
+      One booked movement on a bank account — the ground truth of cash
+      in and out. Mirrored from the bank export; never hand-edited.
+    title_key: reference
+    valid_time_field: date
+    icon: bank
+    color: blue
+    category: Cash/Movements
+    template_role: scaffold
+    adapt_hint: Map your bank CSV/MT940 export columns onto these fields.
+    identity:
+      key: [account_iban, date, amount, reference]
+    # NOT the ADR-0217 unified `fields:` lane — and the compiler says so, in
+    # words. This feed's shape is a 1:1 auto-intake declared on
+    # `extractor.config`, and a compiled config with an empty mapping does not
+    # carry the raw column names, so the origin inference cannot ground these
+    # fields. Author `fields:` here and `validate` REFUSES the model:
+    #
+    #   aggregate `transaction`: uses the unified `fields` list but a source
+    #   feeding it cannot be enumerated (a document/LLM extractor or a
+    #   learn-at-runtime feed), so I cannot tell which fields it fills. List
+    #   the source-fed fields under `mirror:` explicitly for this aggregate.
+    #
+    # That is ADR-0217 D2's opaque-source guard: the inference is SOUND — it
+    # never guesses an origin it cannot ground — and the explicit lane is the
+    # sanctioned escape hatch the refusal names. The five aggregates whose
+    # sources ARE enumerable use `fields:` below.
+    mirror:
+      - { name: account_iban, type: text, required: true, vo: iban, role: identifies, label: Account IBAN, llm_scope: none, description: IBAN of the account this movement booked on }
+      - { name: date, type: date, required: true, label: Value date, salience: summary, description: Value date of the movement }
+      - { name: amount, type: decimal, required: true, vo: money_amount, role: moves, format: "currency:EUR", salience: summary, label: Amount, description: "Movement amount, always positive — direction carries the sign" }
+      - { name: direction, type: enum, enum_values: [credit, debit], required: true, label: Direction, salience: summary, description: "credit = money in, debit = money out" }
+      - { name: counterparty, type: text, label: Counterparty, salience: summary, searchable: true, description: Name of the other side of the movement }
+      - { name: counterparty_iban, type: text, vo: iban, label: Counterparty IBAN, llm_scope: none }
+      - { name: description, type: text, label: Purpose, searchable: true, description: Bank-supplied purpose / remittance text }
+      - { name: reference, type: text, label: Reference, description: End-to-end reference or booking id }
+    relations:
+      # No `kind:` anywhere in this model — the compiler INFERS each edge's
+      # cardinality from its shape, and every edge here is one the shape
+      # settles. This one carries the target's key in a scalar field
+      # (`account_iban`), which IS the to-one side: many movements book onto
+      # one account ⇒ `many-to-one`. The plural read from the ACCOUNT's side
+      # is `inverse_name` ("an account has its movements"), not a second
+      # relation — declaring `one-to-many` on `bank_account` would promise a
+      # traversal no field backs, since the key lives on the movement.
+      - name: booked_on
+        target: bank_account
+        via_field: account_iban
+        inverse_name: movements
+        description: The account this movement belongs to
+
+  # ── source_mirror + authored working-state + derived money fields.
+  - name: invoice
+    context: invoicing
+    display_name: Invoice
+    plural: Invoices
+    description: >-
+      A receivable (outbound, owed TO us by a debtor) or a payable
+      (inbound, owed BY us to a creditor). One type, two directions —
+      the receivable/payable split is `direction`, the debtor/creditor
+      split is the partner's `role`.
+    title_key: invoice_id
+    valid_time_field: issued_date
+    icon: document
+    category: Billing/Invoices
+    template_role: scaffold
+    adapt_hint: Map your accounting system's invoice export onto these fields.
+    # ADR-0083 — exposed to CUSTOMER principals (a debtor may see their invoices).
+    customer_visible: true
+    # ADR-0082 Inc 1 — a MIXED-ORIGIN type; strict validation off admits a partial
+    # authored write the fold merges onto the mirrored record.
+    strict_validation: false
+    identity:
+      key: [invoice_id]
+    mirror:
+      - { name: invoice_id, type: text, required: true, label: Invoice no., salience: summary, searchable: true }
+      - { name: direction, type: enum, enum_values: [outbound, inbound], required: true, label: Direction, salience: summary, description: "outbound = receivable (a debtor owes us), inbound = payable (we owe a creditor)" }
+      - { name: partner_id, type: text, required: true, label: Partner, description: "The debtor (outbound) or creditor (inbound) — joins business_partner" }
+      - { name: issued_date, type: date, required: true, label: Issued on }
+      - { name: due_date, type: date, required: true, salience: summary, label: "Due on", description: "When payment is contractually due — the liquidity clock" }
+      - { name: paid_date, type: date, label: Paid on, description: "When it actually settled (empty = still open)" }
+      - { name: amount, type: decimal, required: true, vo: money_amount, role: owes, format: "currency:EUR", category: Finance/Amounts, salience: summary, label: Amount, description: Gross invoice amount }
+      - { name: currency, type: text, label: Currency, description: ISO currency; EUR unless stated }
+      # NO `overdue` member here — deliberately (ADR-0156 OQ5). "Overdue" is
+      # TIME, not a source fact: no real accounting export carries it (the
+      # mirror-need satisfiability measurement), and a value that changes by
+      # the clock without the source changing cannot be mirrored. The aging
+      # truth is the read-time `days_overdue` below; the tribe's own verdict
+      # is the authored `aging_state`, which the declared `aging:` rule
+      # (ADR-0157) moves to `overdue` at the daily tick.
+      - { name: status, type: enum, enum_values: [open, paid, cancelled], required: true, label: Source status, description: "open = awaiting settlement (including past-due — aging is the read-time days_overdue), paid = settled, cancelled = written off" }
+      - { name: payment_terms_days, type: integer, label: Payment terms (days), description: Net payment window in days }
+      - { name: cash_discount_percent, type: decimal, format: percent, label: "Early-payment discount %", description: "Early-payment discount rate (e.g. 2.0 for 2%)" }
+      - { name: cash_discount_days, type: integer, label: Discount window (days), description: Days within which cash_discount applies }
+    # ── ADR-0082 Inc 1 — the AUTHORED working-state block. Every field carries
+    # `sensitive: true` (ADR-0083 GDPR data-minimisation): the tribe's own
+    # verdicts stay off the customer surface even on this `customer_visible` type.
+    state:
+      - { name: verified, type: boolean, sensitive: true, label: Verified, description: "Passed the verify_invoice checks (amount, partner, terms plausible)" }
+      - { name: verified_date, type: date, sensitive: true, label: Verified on }
+      # ── How well did we READ this invoice? ────────────────────────
+      # An extraction is allowed to be partial: a document that yields no line
+      # items is an "honest empty result", not a failure, and the invoice
+      # header stands on its own (it comes from a SEPARATE source, so a bad
+      # line-item read can never remove the invoice). But partial must be
+      # VISIBLE — an accountant who cannot tell a fully-read invoice from a
+      # half-read one has to re-check all of them.
+      #
+      - { name: settled_by_reference, type: text, sensitive: true, label: Settled by reference, description: The bank-transaction reference reconcile_transaction matched }
+      - { name: cash_discount_taken, type: boolean, sensitive: true, label: Discount taken, description: Whether the early-payment discount was used }
+      # TWO FIELDS, ONE FACT EACH — and that split is load-bearing.
+      #
+      # `effective_status` once carried an `overdue` member, so ageing moved a
+      # receivable OUT of `open` and INTO `overdue`. Every reading of it was
+      # correct and the label still lied: for an accountant "offen" and
+      # "überfällig" are not disjoint — overdue is a SUBSET of open. A grouped
+      # read then returned a bucket honestly named `open` that silently
+      # dropped every past-due invoice, which is exactly the money question an
+      # operator asks and exactly the answer they must not get. Measured, it
+      # was ~1 turn in 5 (eval `open-receivables-is-the-declared-measure`).
+      #
+      # So: whether an invoice is SETTLED and whether it is LATE are two
+      # independent facts and get two fields. It also buys a question the
+      # merged enum destroyed — "which invoices were paid late?" — because
+      # settling no longer overwrites the clock's verdict.
+      #
+      # Both are REQUIRED aging-grade enums: the fold seeds the first member
+      # on every write and registering an aging rule backfills it onto records
+      # that predate the declaration (MF-2), so no fold bucket silently skips
+      # an unseeded record. (Required-from-day-one matters: tightening
+      # optional→required LATER is a Breaking change riding the
+      # operator-confirmed migration path.)
+      # The OVERRIDE, and its first member says so. It used to open with
+      # `open`, which read as "this invoice is unpaid" — but an ingest cannot
+      # write an authored field at all (the fold seeds the first member; that
+      # rejection is what makes an operator's note survive a re-ingest), so
+      # every seeded invoice carried `open` including the ones the feed
+      # reported as PAID. A group-by then produced an `open` bucket of 18
+      # outbound invoices worth 179.700,00 EUR. Same lie as the `overdue`
+      # member before it: a name claiming more than the value knows.
+      #
+      # `from_source` is what the value actually means — the tribe has passed
+      # no verdict, so the feed's `status` stands. The verbs write the other
+      # two members; nothing else ever writes this field.
+      - { name: effective_status, type: enum, enum_values: [from_source, paid, written_off], required: true, sensitive: true, label: Settlement override, salience: summary, description: "The tribe's OWN settlement verdict, and only that — from_source = no verdict passed, the feed's `status` stands; paid / written_off = the tribe acted. Read `settlement` (derived) for the answer; read this only to see whether the tribe overrode the feed." }
+      - { name: aging_state, type: enum, enum_values: [current, overdue], required: true, sensitive: true, label: Lateness, salience: summary, description: "The CLOCK's verdict, independent of settlement — seeded current; the daily aging rule moves it to overdue once due_date passes. It is NOT reset by payment, so a settled invoice still records that it was paid late." }
+      - { name: notes, type: text, sensitive: true, internal: true, label: Working notes, llm_scope: on_prem_only, searchable: true, description: Operator's working notes (authored; survives re-ingest) }
+    # ── ADR-0157 D1 — the AGING rule: time-driven state as a declared
+    # transition, executed as a governed write. The host's daily maintenance
+    # tick writes `aging_state: overdue` (actor `system:aging-tick`, audited,
+    # CAS'd) on every invoice where stored(aging_state) == `current` AND the
+    # guard holds; `today()` is legal in exactly this seam, bound to the tick
+    # date. Forward-only by construction (F7): `overdue != current`, so the
+    # rule can never touch the record twice.
+    #
+    # The GUARD still reads `status` (the settlement axis): an invoice that is
+    # already paid does not become late. So the two axes are independent in
+    # what they RECORD and coupled in when the clock bothers to look.
+    #
+    # Because it is a real WRITE, everything downstream just works: the
+    # `receivables-overdue` process below fires on it, the debtor projection's
+    # `overdue_amount` bucket stays correct as-of-last-tick, and the event log
+    # carries the actor stamp.
+    aging:
+      - field: aging_state
+        from: current
+        becomes: overdue
+        when: 'status == "open" && due_date < today()'
+        description: >-
+          When an invoice's due date passes while it is still open, the daily
+          aging tick marks it overdue — the tribe's own verdict that the
+          receivable is late. Settlement is a separate field and is untouched.
+    derived:
+      # THE settlement answer, and the only field anything should group or
+      # filter on for "is this invoice settled".
+      #
+      # Two fields carry the truth — the feed's `status` and the tribe's
+      # `effective_status` override — and asking either one alone is wrong in
+      # a different direction: the mirror misses a write-off the tribe
+      # performed, the override reads `from_source` on every invoice the tribe
+      # never touched. Coalescing them is a rule, so it is written down ONCE
+      # here instead of being re-derived (differently) per reader. Materialised
+      # on fold, so it groups and filters like any stored field.
+      #
+      # The nested `if` also normalises the mirror's `cancelled` onto the
+      # tribe's word `written_off`, so the result is one vocabulary.
+      - name: settlement
+        type: text
+        expr: 'if(effective_status != "from_source", effective_status, if(status == "cancelled", "written_off", status))'
+        salience: summary
+        label: Settlement
+        description: >-
+          Is this invoice settled — the tribe's override if it passed one, else
+          the feed's status. open = still owed, past-due INCLUDED (lateness is
+          `aging_state`); paid = settled; written_off = abandoned.
+      # A READ-TIME aging field: `as_of()` routes it OFF the fold (computed per
+      # read with the query's as-of date, never stored).
+      - name: days_overdue
+        type: integer
+        expr: "as_of() - due_date"
+        salience: summary
+        label: Days overdue
+        description: >-
+          Days past the due date as of the query date (negative = not yet due).
+          Read-time aging — computed per read, never stored.
+      # MATERIALISED derived money fields via NAMED `@function` refs.
+      - name: cash_discount_amount
+        type: decimal
+        expr: "@cash_discount_amount"
+        vo: money_amount
+        role: owes
+        format: "currency:EUR"
+        category: Finance/Amounts
+        description: >-
+          cash discount (early-payment discount) value = amount × cash_discount_percent ÷ 100,
+          via the reusable `@cash_discount_amount` Function. Materialised on fold.
+      - name: net_amount
+        type: decimal
+        expr: "@net_amount"
+        vo: money_amount
+        role: owes
+        format: "currency:EUR"
+        category: Finance/Amounts
+        description: >-
+          The net (ex-VAT) portion of the gross amount = amount × 100 ÷ 119,
+          via the reusable `@net_amount` Function. Materialised on fold.
+      - name: vat_amount
+        type: decimal
+        expr: "@vat_amount"
+        vo: money_amount
+        role: owes
+        format: "currency:EUR"
+        description: >-
+          The 19% VAT portion of the gross amount, via the reusable
+          `vat_amount` Function. Materialised on fold.
+    relations:
+      - name: with_partner
+        target: business_partner
+        via_field: partner_id
+        inverse_name: invoices
+        enforced: true
+        description: The debtor (outbound) or creditor (inbound) on this invoice
+      # ADR-0082 Inc 1 — a REIFIED relation: the reconciliation MATCH is data ON
+      # the edge (how much, when, the auto-match confidence). A reified edge
+      # infers `many-to-many`, and that is not a technicality: one invoice is
+      # settled by several movements (partial payments) and one movement settles
+      # several invoices (a bulk transfer) — the pairing a scalar key cannot
+      # express, which is WHY the edge is reified in the first place.
+      - name: settled_by
+        target: transaction
+        inverse_name: settles
+        description: The bank movement that paid this invoice (empty = still open)
+        fields:
+          - { name: matched_amount, type: decimal, vo: money_amount, role: settles, description: The portion of the invoice this movement settled }
+          - { name: matched_on, type: date, description: When the reconciliation matched invoice ↔ movement }
+          - { name: match_confidence, type: decimal, description: "Auto-match score 0..1 (1.0 = exact end-to-end reference match)" }
+    # ── The invoice-writing verbs (D1). Each writes the invoice's authored
+    # working-state overlay; the source mirror stays immutable. verify/reconcile/
+    # take_cash_discount are low-risk (auto-admit); write_off is high-risk (always
+    # gated). The key targets the mirrored invoice by direction + id.
+    #
+    # `requires_state` (D8) is the OBJECT-STATE guard: a `{field: predicate}`
+    # map over the invoice's CURRENT record, enforced CENTRALLY by the verb
+    # pre-flight (the handler never sees it) and advertised on
+    # `describe(invoice).actions[]` — so the condition lives in the API/gate
+    # layer and the verb stays reusable. `!= paid` is the honest "still
+    # unsettled" read (the bounded predicate DSL has no `in […]`); the
+    # direction guard pins cash_discount to payables (inbound) only.
+    commands:
+      - name: verify_invoice
+        # ADR-0155 — the authored button text every surface renders instead of
+        # the humanised slug ("Verify invoice").
+        label: "Mark as checked"
+        description: >-
+          Mark an invoice as verified once its amount, partner, and terms have
+          been checked against the order/contract. Records the verdict on the
+          invoice (authored working-state fields); does not move money.
+        risk: low
+        # The key MUST match the invoice's identity (`invoice_id`) so the upsert
+        # updates the ingested record — a composite `{direction}|{invoice_id}`
+        # key would target a different key and split off a phantom record.
+        # `invoice_id` rides in the body via the identity carve-out.
+        key: "{invoice_id}"
+        inputs:
+          - invoice_id
+        fields:
+          - { name: invoice_id, from: invoice_id }
+          - { name: verified, const: true }
+          - { name: verified_date, now_date: true }
+      - name: reconcile_transaction
+        label: Match to a bank movement
+        description: >-
+          Reconcile an invoice against the bank transaction that settled it.
+          Records the matched transaction reference and marks the invoice paid
+          on the invoice's authored working-state fields. Only while the invoice
+          is still unpaid (`status != paid`) — the gate refuses a double-settle.
+        risk: low
+        requires_state:
+          status: "!= paid"
+        # The key MUST match the invoice's identity (`invoice_id`) so the upsert
+        # updates the ingested record — a composite `{direction}|{invoice_id}`
+        # key would target a different key and split off a phantom record.
+        # `invoice_id` rides in the body via the identity carve-out.
+        key: "{invoice_id}"
+        inputs:
+          - invoice_id
+          # Explicitly required: the TARGET field (`settled_by_reference`) is
+          # optional working state, but reconciling WITHOUT the reference is
+          # meaningless — the explicit mark overrides the follow-the-field
+          # default (and keeps parity with the hand-authored verb).
+          - { name: transaction_reference, required: true, description: The reference of the matching bank transaction }
+        fields:
+          - { name: invoice_id, from: invoice_id }
+          - { name: settled_by_reference, from: transaction_reference }
+          - { name: effective_status, const: paid }
+      - name: take_cash_discount
+        label: Take the early-payment discount
+        description: >-
+          Record that the early-payment discount (cash_discount) is being taken on an
+          inbound invoice. The discounted amount is settled by a subsequent
+          payment. Only on an OPEN payable (`direction == inbound` AND
+          `status == open`) — a receivable or an already-settled invoice is
+          refused at the gate.
+        risk: low
+        requires_state:
+          direction: "inbound"
+          status: "open"
+        # The key MUST match the invoice's identity (`invoice_id`) so the upsert
+        # updates the ingested record — an `inbound|{invoice_id}` key would
+        # target a different key and split off a phantom record. `invoice_id`
+        # rides in the body via the identity carve-out.
+        key: "{invoice_id}"
+        inputs:
+          - invoice_id
+        fields:
+          - { name: invoice_id, from: invoice_id }
+          - { name: cash_discount_taken, const: true }
+      - name: write_off_invoice
+        label: Write off
+        description: >-
+          Write off an invoice as uncollectable or cancelled. Records the
+          write-off on the invoice's authored working-state fields. High risk — always
+          operator-confirmed. Only while still unpaid (`status != paid`) — a settled
+          invoice cannot be written off, and the gate refuses it.
+        risk: high
+        rule_key: write_off.invoice
+        requires_state:
+          status: "!= paid"
+        # The key MUST match the invoice's identity (`invoice_id`) so the upsert
+        # updates the ingested record — a composite `{direction}|{invoice_id}`
+        # key would target a different key and split off a phantom record.
+        # `invoice_id` rides in the body via the identity carve-out.
+        key: "{invoice_id}"
+        inputs:
+          - invoice_id
+          - { name: reason, required: false, description: Why it is being written off (audit trail) }
+        fields:
+          - { name: invoice_id, from: invoice_id }
+          - { name: effective_status, const: written_off }
+          - { name: notes, from: reason }
+
+  # ── authored + minted-key: a payment intent with a closed status set.
+  - name: payment
+    context: payments
+    display_name: Payment
+    plural: Payments
+    description: >-
+      An intent to move cash to settle a payable — its own lifecycle
+      (planned → approved → executed) so a money-moving action is never
+      a single unguarded step. Created by schedule_payment, advanced by
+      approve_payment, completed by pay_invoice.
+    # ADR-0201 — a payment is TRUE from the day it is planned, not from the
+    # day it clears: the plan is a fact the books carry, and a Stichtag before
+    # execution must show the payment as planned rather than not at all.
+    valid_time_field: scheduled_date
+    title_key: invoice_id
+    icon: payment
+    category: Payables/Payments
+    identity:
+      key: [id]
+      strategy: uuid
+    fields:
+      - { name: id, type: text, label: Payment id, description: "Minted v4 UUID (key_strategy=uuid) — the payment's stable handle."  }
+      - { name: invoice_id, type: text, required: true, label: Invoice, salience: summary, description: The inbound invoice this payment settles  }
+      - { name: partner_id, type: text, label: Partner, description: The creditor being paid  }
+      - { name: account_iban, type: text, vo: iban, label: From account, llm_scope: none, description: Which account the cash leaves from  }
+      - { name: amount, type: decimal, required: true, vo: money_amount, role: pays, format: "currency:EUR", label: Amount, salience: summary, description: Amount to pay (net of cash_discount if taken)  }
+      - { name: scheduled_date, type: date, label: Scheduled for, salience: summary, description: When the payment is planned to execute  }
+      - { name: executed_date, type: date, label: Executed on, description: When it actually went out (empty until executed)  }
+      - { name: method, type: enum, enum_values: [sepa, wire, direct_debit, manual], label: Method, salience: summary, description: How the payment is made  }
+    # ── The payment lifecycle (D1): the ONE source for the closed `status` enum
+    # AND the money-moving verbs' `requires_state` guards + status writes.
+    # approve_payment advances planned→approved; pay_invoice approved→executed
+    # (`failed`/`cancelled` are terminal states reached out-of-band).
+    lifecycle:
+      field: status
+      states: [planned, approved, executed, failed, cancelled]
+      description: The payment lifecycle — gates the money-moving verbs
+      transitions:
+        - { command: approve_payment, from: planned, to: approved }
+        - { command: pay_invoice, from: approved, to: executed }
+    relations:
+      # ENFORCED — a money-moving payment MUST reference a real payable.
+      # Deliberately NOT `strength: part_of` (unlike `dunning.chases` and
+      # `payment_promise.promises`, ADR-0226 D1): a payment is its own economic
+      # event. Cash left an account on a date; it also relates to a bank account
+      # and a creditor. `enforced` says it may not dangle — that is a different
+      # statement from "has no standalone meaning", and conflating the two is
+      # exactly what the strength axis exists to stop.
+      - name: settles
+        target: invoice
+        via_field: invoice_id
+        inverse_name: paid_by
+        enforced: true
+        description: The payable this payment discharges
+      - name: drawn_from
+        target: bank_account
+        via_field: account_iban
+        inverse_name: payments
+        description: The account the cash leaves from
+      - name: pays
+        target: business_partner
+        via_field: partner_id
+        inverse_name: payments
+        description: The creditor this payment pays
+      # ── REIFIED edge (ADR-0126): the settlement itself, as a relationship
+      # WITH DATA. `settles` above is the structural FK (which payable); this
+      # records HOW MUCH settled WHEN. Reified because an invoice may be settled
+      # by SEVERAL payments (partial settlements) — each a `settlement` edge with
+      # its own amount, which a scalar foreign key cannot express. Authored by the
+      # `payment-settlement-edge` process's `does: link` step at execution.
+      # Reified ⇒ the inferred cardinality is `many-to-many`, which is what the
+      # record detail reads to render the settlement edges as link cards.
+      - name: settlement
+        target: invoice
+        description: The settlement of a payable — a reified edge carrying the settled amount and date.
+        fields:
+          - { name: settled_amount, type: decimal, vo: money_amount, role: pays, format: "currency:EUR", description: The amount this payment settled }
+          - { name: settled_on, type: date, description: The date this settlement executed }
+    # ── The three deliberately-separate payment steps (plan → approve → pay).
+    # schedule_payment opens the lifecycle at `planned` (low risk); approve and
+    # pay are lifecycle transitions (their `requires_state` + status write are
+    # GENERATED from the lifecycle above — D1). approve is medium, pay is high
+    # (a money-moving execution is always operator-confirmed).
+    commands:
+      - name: schedule_payment
+        label: Schedule a payment
+        description: >-
+          Schedule a payment to settle an inbound invoice (a payable). Creates
+          a payment in the `planned` state; approval and execution are separate
+          steps.
+        risk: low
+        requires:
+          amount: "> 0"
+        inputs:
+          - invoice_id
+          - { name: partner_id, required: false }
+          - { name: account_iban, required: false }
+          - { name: amount, description: "Amount to pay (decimal string), net of cash_discount if taken" }
+          - { name: scheduled_date, required: false, description: ISO date the payment should execute }
+          - { name: method, required: false, description: "How the payment is made — sepa (default), wire, direct_debit, or manual" }
+        fields:
+          - { name: invoice_id, from: invoice_id }
+          - { name: partner_id, from: partner_id }
+          - { name: account_iban, from: account_iban }
+          - { name: amount, from: amount }
+          - { name: scheduled_date, from: scheduled_date }
+          - { name: method, from: method }
+          - { name: status, const: planned }
+      - name: approve_payment
+        label: Approve
+        description: >-
+          Approve a planned payment so it becomes eligible for execution.
+          Requires the payment to be in the `planned` state. Operator-gated.
+        risk: medium
+        rule_key: approve.payment
+        key: "{id}"
+        inputs:
+          - { name: id, description: The minted payment id (from schedule_payment's receipt) }
+        fields:
+          - { name: id, from: id }
+      - name: pay_invoice
+        label: Pay this invoice
+        description: >-
+          Execute an approved payment, settling the payable and moving cash.
+          Requires the payment to be `approved`. High risk — every execution is
+          operator-confirmed; this never auto-admits.
+        risk: high
+        rule_key: pay.invoice
+        key: "{id}"
+        inputs:
+          - { name: id, description: The minted payment id (from schedule_payment's receipt) }
+        fields:
+          - { name: id, from: id }
+          - { name: executed_date, now_date: true }
+
+  # ── source_mirror + authored: the partner master (mixed origin).
+  - name: business_partner
+    context: counterparties
+    display_name: Business Partner
+    plural: Business Partners
+    description: >-
+      A counterparty. A DEBTOR owes us (we issue them outbound
+      invoices); a CREDITOR is owed by us (they send us inbound
+      invoices). `both` when the relationship runs both ways.
+    title_key: name
+    icon: partner
+    category: Counterparties
+    customer_visible: true
+    identity:
+      key: [partner_id]
+    mirror:
+      - { name: partner_id, type: text, required: true, label: Partner no., searchable: true }
+      - { name: name, type: text, required: true, label: Name, salience: summary, searchable: true }
+      - { name: role, type: enum, value_set: partner_role, required: true, label: Role, salience: summary, description: "debtor = owes us (receivables), creditor = we owe them (payables)" }
+      - { name: iban, type: text, vo: iban, role: identifies, label: IBAN, llm_scope: none }
+      - { name: payment_terms_days, type: integer, label: Payment terms (days), description: Agreed net payment window }
+      - { name: cash_discount_percent, type: decimal, format: percent, label: Discount %, description: Early-payment discount they grant (creditor) or we grant (debtor) }
+      - { name: cash_discount_days, type: integer, label: Discount window (days) }
+      # Enriched-at-ingest risk band, modelled as a plain sensitive field (our
+      # INTERNAL assessment — a debtor must not read the band we assign them).
+      - { name: risk_band, type: text, sensitive: true, label: Risk band, salience: summary, llm_scope: on_prem_only, description: "Receivables-risk band (low/medium/high), enriched at ingest from payment terms" }
+      - { name: city, type: text, label: City }
+      - { name: notes, type: text, sensitive: true, internal: true, label: Working notes, llm_scope: on_prem_only, searchable: true }
+      - { name: telegram_chat_id, type: text, label: Telegram chat id, llm_scope: none, description: Telegram chat id for outbound dunning notices (ADR-0098) }
+    state:
+      # AUTHORED: the tribe's own risk ceiling — not in the feed, sensitive
+      # (a debtor must never read the exposure cap we set on them).
+      - { name: credit_limit, type: decimal, sensitive: true, vo: money_amount, format: "currency:EUR", label: Credit limit, llm_scope: on_prem_only, description: Exposure ceiling for this partner (receivables risk) }
+      # EXTERNAL bureau rating — the counterparty's creditworthiness as told by a
+      # credit bureau (Schufa/Creditreform). Distinct from `risk_band` (our OWN
+      # receivables-risk, derived from payment terms). Sensitive: a debtor must
+      # not read the bureau rating we hold. Acquired two ways (see the credit
+      # flows below): a clean cross-tribe `fetch` OR, realistically, extracted
+      # from a PDF credit report.
+      - { name: credit_assessment, type: text, sensitive: true, label: Credit assessment, llm_scope: on_prem_only, description: "External credit-bureau rating (e.g. Creditreform credit index / Schufa class), acquired by fetch or PDF extraction" }
+
+  # ── authored + minted-key: an escalating dunning notice (append event).
+  - name: dunning
+    context: receivables
+    display_name: Dunning Notice
+    plural: Dunning Notices
+    description: >-
+      A reminder chasing an overdue OUTBOUND invoice (a debtor who has
+      not paid). Escalates through levels; the receivables-side mirror
+      of a payment.
+    # ADR-0201 — a dunning notice is TRUE from the day it was sent. Before
+    # that it is a draft nobody has been told about.
+    valid_time_field: sent_date
+    title_key: invoice_id
+    icon: mail
+    category: Receivables/Dunning
+    identity:
+      key: [id]
+      strategy: uuid
+    fields:
+      - { name: id, type: text, label: Notice id, description: "Minted v4 UUID (key_strategy=uuid) — this notice's id." }
+      - { name: invoice_id, type: text, required: true, label: Invoice, salience: summary, description: The overdue outbound invoice being chased }
+      - { name: partner_id, type: text, label: Debtor, salience: summary, description: The debtor being reminded }
+      - { name: level, type: integer, required: true, label: Level, salience: summary, description: "Escalation level — 1 (friendly) → 2 (formal) → 3 (final / pre-legal)" }
+      - { name: sent_date, type: date, label: Sent on }
+      - { name: amount, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", label: Amount, salience: summary, description: Outstanding amount being chased }
+      - { name: status, type: enum, enum_values: [open, sent, escalated, resolved, written_off], required: true, label: Status, salience: summary }
+    relations:
+      # ADR-0226 D1/D2 — a PART, not a reference. A dunning notice exists only
+      # to chase one specific receivable: its `title_key` IS `invoice_id`, and
+      # every field on it (level, amount, status) is about that invoice. Delete
+      # the invoice and the notice means nothing, so the store refuses to (D3
+      # refuses rather than cascades — there is no cross-type transaction).
+      # Declared on the PART pointing at its whole, the only direction the
+      # grammar supports (the key lives here).
+      - name: chases
+        target: invoice
+        via_field: invoice_id
+        inverse_name: reminders
+        enforced: true
+        strength: part_of
+        description: The overdue receivable this notice chases
+      - name: reminds
+        target: business_partner
+        via_field: partner_id
+        inverse_name: dunnings
+        description: The debtor this notice reminds
+    # ── Dunning: each notice is a fresh append event — the uuid identity mints
+    # at the write seam (no `key:` needed) so a level-2 escalation is a NEW
+    # record, not an overwrite. Medium risk (a customer-facing notice over the
+    # operator's name → gated).
+    commands:
+      - name: dun_invoice
+        label: Send a reminder
+        description: >-
+          Issue or escalate a dunning notice on an overdue outbound invoice.
+          Level 1 is a friendly reminder, 2 a formal notice, 3 a final /
+          pre-legal demand. Operator-gated.
+        risk: medium
+        rule_key: dun.invoice
+        inputs:
+          - invoice_id
+          - { name: partner_id, required: false }
+          - { name: level, type: integer, enum: [1, 2, 3] }
+          - { name: amount, required: false, description: Outstanding amount being chased (decimal string) }
+        fields:
+          - { name: invoice_id, from: invoice_id }
+          - { name: partner_id, from: partner_id }
+          - { name: level, from: level }
+          - { name: amount, from: amount }
+          - { name: sent_date, now_date: true }
+          - { name: status, const: open }
+      # ── Closing a notice's lifecycle. `dun_invoice` opens it (`open`), the
+      # `dunning-escalation` process's `on_done` records the send (`sent`);
+      # these three operator verbs move a notice to its terminal states. Each
+      # targets an EXISTING notice by its minted id (`key: {id}`, the
+      # approve_payment update pattern) and stamps `status` — clearing the
+      # dead-member audit for `escalated` / `resolved` / `written_off`.
+      - name: escalate_dunning
+        label: Escalate
+        description: >-
+          Mark a dunning notice as escalated — a higher-level notice now
+          supersedes it (escalation mints a NEW notice; this closes the prior
+          one). Operator-gated.
+        risk: medium
+        rule_key: escalate.dunning
+        key: "{id}"
+        inputs:
+          - { name: id, description: The dunning notice id (from dun_invoice's receipt) }
+        fields:
+          - { name: id, from: id }
+          - { name: status, const: escalated }
+      - name: resolve_dunning
+        label: Mark as resolved
+        description: >-
+          Resolve a dunning notice — the chased invoice has settled, so the
+          reminder chain closes cleanly. Operator-gated.
+        risk: medium
+        rule_key: resolve.dunning
+        key: "{id}"
+        inputs:
+          - { name: id, description: The dunning notice id }
+        fields:
+          - { name: id, from: id }
+          - { name: status, const: resolved }
+      - name: write_off_dunning
+        label: Write off
+        description: >-
+          Write off a dunning notice — the receivable is abandoned as
+          uncollectable; the notice closes without settlement. High risk (a
+          write-off is a money decision).
+        risk: high
+        rule_key: write-off.dunning
+        key: "{id}"
+        inputs:
+          - { name: id, description: The dunning notice id }
+        fields:
+          - { name: id, from: id }
+          - { name: status, const: written_off }
+
+  # ── authored: a bank cash account.
+  - name: bank_account
+    context: treasury
+    display_name: Bank Account
+    plural: Bank Accounts
+    description: A cash account the business holds at a bank.
+    title_key: account_name
+    icon: card
+    category: Cash/Accounts
+    identity:
+      key: [iban]
+    fields:
+      - { name: iban, type: text, required: true, vo: iban, role: identifies, label: IBAN, llm_scope: none }
+      - { name: account_name, type: text, label: Account name, salience: summary }
+      - { name: bank, type: text, label: Bank, salience: summary }
+      - { name: currency, type: text, label: Currency, description: ISO currency; EUR unless stated  }
+      # The audit anchor: a balance nobody can re-derive is a number an operator
+      # has to believe. With the opening pair, `balance` is CHECKABLE — opening
+      # balance plus every movement booked on this account since `opening_date`
+      # must equal it, and the seed data is generated so it does.
+      - { name: opening_balance, type: decimal, vo: money_amount, role: holds, format: "currency:EUR", label: Opening balance, description: The account balance on `opening_date` — the anchor the movements fold onto  }
+      - { name: opening_date, type: date, label: Opening balance as of, description: The date `opening_balance` was taken; movements from here on reconcile to `balance`  }
+      - { name: balance, type: decimal, vo: money_amount, role: holds, format: "currency:EUR", label: Balance, salience: summary, description: Last known balance in account currency  }
+      - { name: balance_date, type: date, label: Balance as of, description: As-of date of the balance  }
+
+  # ── ADR-0202 D3 — where a learned estimate LANDS.
+  #
+  # A plain append entity with no component edge, anchored on the date the
+  # estimate is ABOUT (`target_date`), never the run date. The anchor is not
+  # a nicety: the governed aggregate lanes terminate a Stichtag in SQL and
+  # refuse honestly on an unanchored type, so without it every dated chart
+  # over this forecast would refuse instead of answering "was sagte die
+  # Prognose zum 31.03.?".
+  #
+  # `procedure_version` rides each row so a redeploy changes FUTURE estimates
+  # without rewriting the ones already reported.
+  - name: cash_inflow_estimate
+    context: analytics
+    display_name: Cash Inflow Estimate
+    plural: Cash Inflow Estimates
+    description: >-
+      A dated estimate of expected cash inflow, written by the `cash-forecast`
+      Procedure at the boundary. Estimate, not fact — the row carries the
+      model version that produced it.
+    icon: chart
+    color: amber
+    category: Analytics/CashFlow
+    valid_time_field: target_date
+    identity:
+      # target_date AND procedure_version: a re-run at a new version must leave the
+      # older estimate standing, or "what did v3 predict for March" has no
+      # answer after v4 ships — and the v3-vs-v4 comparison ADR-0202 D8.1 calls
+      # an ordinary group-by-version read would have only one row to group.
+      key: [target_date, procedure_version]
+    state:
+      # Both key parts are required: a missing part yields no key at all and the
+      # row is refused, but a present-and-EMPTY one would join to a truncated
+      # key and quietly collapse every such estimate onto one row.
+      - { name: target_date, type: date, required: true, label: For date, description: The date this estimate is ABOUT — the forecast's valid-time anchor. }
+      - { name: as_of, type: date, label: Computed from, description: The date the forecast was made from; the Procedure's input. }
+      # The horizon is DECLARED per row rather than derived from
+      # `target_date - as_of`, because it is an INPUT: it is what the
+      # Procedure was asked, and the row has to carry the question to be a
+      # record of the answer. It is also what makes one weekly run write a
+      # whole curve — 7, 14, … 91 — off a single `as_of`.
+      - { name: horizon_days, type: integer, required: true, label: Horizon (days), description: "How far ahead this estimate looks, in days — the Procedure's second input (7 = the next week)." }
+      - { name: procedure_version, type: text, required: true, label: Procedure version, salience: summary, description: "Which Procedure version this row is FOR — half its identity, so v3's and v4's estimates for one date stand side by side. Authored, because a key part has to exist before the row does; `computed_by_version` is what actually answered." }
+    enriched:
+      - { name: expected_inflow, type: decimal, function: cash_inflow_forecast }
+      # The SAME call also states which version answered, and until the
+      # authoring lane could name a differently-spelled answer key that fact
+      # was dropped on the floor: the row kept `procedure_version` — an AUTHORED
+      # value, seeded from the CSV — and the Procedure's own claim went
+      # nowhere. Two sources for one fact, agreeing only because the seed and
+      # the installed component happened to say the same thing.
+      #
+      # They stop agreeing exactly when it matters. Install v4, re-ingest a
+      # seed still labelled v3, and every row claims a version that did not
+      # compute it — with no error anywhere, which is the failure ADR-0202 D7
+      # exists to prevent.
+      #
+      # `procedure_version` cannot itself be enriched: it is half the identity
+      # key, and an effecting enrichment runs at the boundary AFTER the row is
+      # keyed. So the authored claim stays, and the computed one lands beside
+      # it where a disagreement is visible on the row.
+      - { name: computed_by_version, type: text, function: cash_inflow_forecast, enrich_output: procedure_version }
+
+  # ── ADR-0202 D5 — the per-invoice settlement estimate.
+  #
+  # WHY THIS IS ITS OWN TYPE and not four enriched fields on `invoice`.
+  #
+  # Two reasons, and the first WAS a privacy one: `invoice` is
+  # `customer_visible: true`, the customer read masks exactly the fields marked
+  # `sensitive`, and the DDD lane's `EnrichedField` had no such mark — so an
+  # enriched estimate on `invoice` would have been readable BY THE DEBTOR IT IS
+  # ABOUT, with no way to say otherwise.
+  #
+  # That gap is closed. `EnrichedField` carries `sensitive` (ADR-0083), and its
+  # own doc comment names this exact case as why it was added. The first reason
+  # no longer decides anything, and this comment claimed otherwise for as long
+  # as the mark has existed.
+  #
+  # The second is that a debtor model has no business running over payables.
+  # `invoice` is one type in two directions; enriching it would call the
+  # Procedure for every creditor invoice too, and while the component answers
+  # those honestly (`no_history`), a stored row per payable claiming a
+  # settlement estimate is noise the operator has to learn to ignore.
+  #
+  # An estimate is also not a fact about the invoice — same reasoning that
+  # keeps `cash_inflow_estimate` off `payment`. It is a record of a question
+  # and its answer, which is why the question's inputs are stored beside it.
+  - name: settlement_estimate
+    context: analytics
+    display_name: Settlement Estimate
+    plural: Settlement Estimates
+    description: >-
+      When one open receivable is expected to ACTUALLY settle, written by the
+      `payment-delay` Procedure at the boundary. Estimate, not promise — the
+      row carries the model version that produced it, the spread behind it,
+      and how much of it rests on that debtor's own history.
+    icon: chart
+    color: amber
+    category: Analytics/CashFlow
+    valid_time_field: due_date
+    identity:
+      # invoice_id AND procedure_version, for the same reason
+      # `cash_inflow_estimate` keys on its version: a re-run at a new version
+      # must leave the older estimate standing, or "what did v1 expect for
+      # this invoice" has no answer once v2 ships.
+      key: [invoice_id, procedure_version]
+    state:
+      - { name: invoice_id, type: text, required: true, label: Invoice no., salience: summary, searchable: true, description: The receivable this estimate is about — joins `invoice`. }
+      - { name: partner_id, type: text, required: true, label: Debtor, description: "The debtor the invoice is owed by — the Procedure's first input, and the whole reason two invoices due the same day get different answers." }
+      - { name: due_date, type: date, required: true, label: "Due on", description: "The contractual due date — the Procedure's second input, and the clock the delay is measured against." }
+      # Copied with the amount, and for the same reason the money measures
+      # above carry `currency == EUR`: `amount` below is in the invoice's own
+      # currency, so the settlement curve has to say which one it sums.
+      - { name: currency, type: text, required: true, label: Currency, description: "ISO 4217 code of the receivable, copied from the invoice." }
+      # The amount is COPIED from the invoice rather than joined, for the same
+      # reason `cash_inflow_estimate` stores `horizon_days`: the row has to
+      # carry the question to be a record of the answer, and the expected
+      # settlement curve is a grouped read over ONE source.
+      - { name: amount, type: decimal, required: true, vo: money_amount, role: owes, format: "currency:EUR", category: Finance/Amounts, salience: summary, label: Amount, description: The gross amount expected to move on the estimated date. }
+      - { name: procedure_version, type: text, required: true, label: Procedure version, salience: summary, description: "Which Procedure version this row is FOR — half its identity. Authored, because a key part has to exist before the row does; `computed_by_version` is what actually answered." }
+    relations:
+      # The receivable this estimate is about. `invoice_id` was here from the
+      # start, its description said "joins `invoice`" — and nothing DECLARED the
+      # edge, so the join existed in prose only: no line in the atlas, no
+      # Beziehungen door from an estimate to the invoice it estimates, and no
+      # `traverse` that could reach it. The only edge these rows had was the
+      # `mirrored_from` lineage link every ingested type gets for free, which
+      # points at the seed CSV's `source` rather than at the book.
+      #
+      # `strength: part_of` for the same reason as `dunning.chases` (ADR-0226
+      # D1): `invoice_id` is half this type's identity key, and every field on
+      # the row — the expected date, the delay, the spread — is a statement
+      # about that one invoice. Delete the invoice and the estimate means
+      # nothing. `enforced` because an estimate for a receivable that does not
+      # exist is not a partial answer, it is a dangling one (verified against
+      # the seed: all 16 rows resolve).
+      - name: estimates
+        target: invoice
+        via_field: invoice_id
+        inverse_name: settlement_estimates
+        enforced: true
+        strength: part_of
+        description: The open receivable whose settlement date this row estimates
+      # The debtor. `partner_id` is the Procedure's FIRST input — "the whole
+      # reason two invoices due the same day get different answers" — so the
+      # edge from an estimate to the debtor whose payment behaviour produced it
+      # is the one an operator most wants to walk, and it was undeclared.
+      #
+      # A REFERENCE and unenforced, matching `dunning.reminds`: this row is
+      # part_of its INVOICE (above), and the debtor is a separate fact about it.
+      - name: owed_by
+        target: business_partner
+        via_field: partner_id
+        inverse_name: settlement_estimates
+        description: The debtor whose payment behaviour this estimate is drawn from
+    enriched:
+      - { name: expected_payment_date, type: date, function: settlement_delay_forecast }
+      - { name: expected_delay_days, type: integer, function: settlement_delay_forecast }
+      # The spread rides along because a mean without one reads as confidence
+      # the fit does not have. BP-004's partner note says "irregular payment
+      # behaviour"; its fitted mean is +11.6 days with a spread of ±4.8, and a
+      # row showing only the date would present a week-wide guess as a day.
+      - { name: delay_spread_days, type: decimal, function: settlement_delay_forecast, enrich_output: delay_stdev_days }
+      # `own_history` / `blended` / `no_history` — how much of the answer is
+      # this debtor's own record. Without it a client seen fifteen times looks
+      # exactly like one seen a hundred and seventy.
+      - { name: delay_basis, type: text, function: settlement_delay_forecast, enrich_output: basis }
+      - { name: computed_by_version, type: text, function: settlement_delay_forecast, enrich_output: procedure_version }
+
+  # ── source_mirror: the ECB euro reference rates — the impure half of the
+  # fx valuation, and the only thing in this tribe that reaches the internet.
+  #
+  # It is a MIRROR, not authored: nobody in this house sets an exchange rate.
+  # The rate for a day never changes once published, so a re-ingest is an
+  # upsert onto the same key and the history is append-only in practice.
+  - name: fx_rate
+    context: treasury
+    display_name: Reference Rate
+    plural: Reference Rates
+    description: >-
+      The ECB euro foreign-exchange reference rate for one currency on one
+      day — units of that currency per ONE euro. Published each business day
+      around 16:00 CET, so there is systematically no rate for today until
+      the afternoon, and none at all for weekends and TARGET holidays.
+    title_key: currency
+    valid_time_field: rate_date
+    icon: chart
+    category: Treasury/Rates
+    identity:
+      # Currency AND date: one row per quote, which is what lets a stored
+      # valuation name the exact snapshot it was anchored to.
+      key: [currency, rate_date]
+    mirror:
+      - { name: currency, type: text, required: true, label: Currency, salience: summary, searchable: true, description: "ISO 4217 code of the quoted currency." }
+      - { name: rate_date, type: date, required: true, label: Quoted on, salience: summary, description: "The business day this rate was published for." }
+      # TEXT, not decimal, and deliberately: the ECB quotes USD and CHF to four
+      # decimals and GBP to five, and a decimal column with one fixed scale
+      # would silently round one of them. The Procedure parses it.
+      - { name: rate_per_eur, type: text, required: true, label: Rate per EUR, salience: summary, description: "Units of `currency` per ONE euro — the ECB quoting convention. A RISING rate means the euro strengthened, so a receivable in that currency is worth less." }
+
+  # ── ADR-0202 D5 — the per-invoice fx valuation, and the FIRST type in this
+  # tribe whose answer needs two axes to be reproducible.
+  #
+  # `procedure_version` says WHICH model. `rate_date` + `rate_per_eur` say
+  # WHICH MARKET. Drop either and the stored figure cannot be re-derived: the
+  # same v1 model against a rate from another morning is a different, equally
+  # correct number. Both therefore sit on the row rather than on the card.
+  #
+  # The authored/computed pairing repeats the one `cash_inflow_estimate`
+  # carries: `rate_date` is the question (which snapshot was I asked to use)
+  # and `anchored_to_rate_date` is the Procedure's own account of what it
+  # actually used. Agreement is the healthy reading; a disagreement is visible
+  # instead of silent.
+  - name: fx_valuation
+    context: analytics
+    display_name: FX Valuation
+    plural: FX Valuations
+    description: >-
+      What one open foreign-currency receivable is expected to be worth in
+      euro when it settles, written by the `fx-exposure` Procedure at the
+      boundary. An ESTIMATE and a BAND — and only true against the rate
+      snapshot the row names.
+    icon: chart
+    color: amber
+    category: Analytics/CashFlow
+    valid_time_field: rate_date
+    identity:
+      # The invoice, the model version AND the snapshot. Re-valuing tomorrow
+      # at tomorrow's rate must leave today's row standing, or "what was it
+      # worth when we reported it" has no answer.
+      key: [invoice_id, procedure_version, rate_date]
+    state:
+      - { name: invoice_id, type: text, required: true, label: Invoice no., salience: summary, searchable: true, description: The receivable this valuation is about — joins `invoice`. }
+      - { name: currency, type: text, required: true, label: Currency, salience: summary, description: "ISO 4217 code of the receivable — the Procedure's first input, and what selects the fitted volatility." }
+      - { name: amount_foreign, type: text, required: true, label: Amount (foreign), description: "The invoice amount in its own currency. TEXT, because it is handed to the Procedure verbatim and a decimal column would round it on the way." }
+      - { name: rate_per_eur, type: text, required: true, label: Rate used, description: "The reference rate this valuation was anchored to, copied from `fx_rate` — half the audit answer." }
+      - { name: rate_date, type: date, required: true, label: Rate quoted on, salience: summary, description: "The day that rate was published. The OTHER half, and part of the identity: a re-valuation at a new snapshot is a new row." }
+      - { name: days_to_settlement, type: integer, required: true, label: Days to settlement, description: "How far ahead the band is drawn — normally the `payment-delay` Procedure's answer for this invoice, which is what makes the two compose." }
+      - { name: procedure_version, type: text, required: true, label: Procedure version, salience: summary, description: "Which Procedure version this row is FOR — part of its identity. Authored, because a key part has to exist before the row does; `computed_by_version` is what actually answered." }
+    relations:
+      # Same omission as `settlement_estimate.estimates`, same reasoning: the
+      # valuation is ABOUT one foreign-currency receivable, `invoice_id` is part
+      # of its identity key, and the edge was described in prose but never
+      # declared.
+      - name: values
+        target: invoice
+        via_field: invoice_id
+        inverse_name: fx_valuations
+        enforced: true
+        strength: part_of
+        description: The foreign-currency receivable this row values in euro
+    enriched:
+      # These are OUR assessment of a customer's invoice, and an earlier draft
+      # marked every one `sensitive` — the type is not customer-visible, but
+      # it could become so and the leak would be silent.
+      #
+      # The marks are gone, and `fx_exposure_outlook` is the reason: this type
+      # EXISTS to be rolled up per currency, and the engine refuses a
+      # `sensitive` measure at pin time, because a one-invoice currency group
+      # would publish the very figure the mark withholds. A type whose whole
+      # purpose is an aggregate cannot carry a mark that forbids aggregating
+      # it.
+      #
+      # Dropping them from only the three summed figures was the worse option,
+      # not the smaller one: `band_pct` exists so the middle does not read as
+      # a fact, and a caller shown `expected_eur` with the width masked reads
+      # exactly the false confidence it guards against. They travel together
+      # or not at all.
+      #
+      # `settlement_estimate` is the precedent — same class of assessment, the
+      # same kind of Procedure output, rolled up the same way by
+      # `expected_settlement` — and it has never carried them.
+      #
+      # What it costs: an ungranted caller now sees the per-invoice euro
+      # valuation. `customer_visible` is what keeps this type in-house; if it
+      # is ever exposed, the euro figures need a projection that aggregates
+      # them, not a mark that cannot ride here.
+      #
+      # `decimal`, not `text`, for the three that are summed — `amount_foreign`
+      # above is text because it goes INTO the Procedure verbatim; these come
+      # back out and get added up, and `settlement_estimate.delay_spread_days`
+      # types its numeric Procedure output the same way.
+      - { name: expected_eur, type: decimal, function: fx_exposure_valuation }
+      - { name: band_low_eur, type: decimal, function: fx_exposure_valuation }
+      - { name: band_high_eur, type: decimal, function: fx_exposure_valuation }
+      # The width, in percent. Without it the middle reads as a fact.
+      - { name: band_pct, type: text, function: fx_exposure_valuation }
+      # `fitted` or `no_fx_risk` — a euro receivable has no band and says so.
+      - { name: valuation_basis, type: text, function: fx_exposure_valuation, enrich_output: basis }
+      # The Procedure's own account of the snapshot it used, beside the
+      # authored `rate_date` that asked for one.
+      - { name: anchored_to_rate_date, type: date, function: fx_exposure_valuation, enrich_output: rate_date }
+      - { name: computed_by_version, type: text, function: fx_exposure_valuation, enrich_output: procedure_version }
+
+  # ── authored + explicit natural key: an overdraft line.
+  - name: credit_facility
+    context: treasury
+    display_name: Credit Facility
+    plural: Credit Facilities
+    description: >-
+      An overdraft line tied to an account — a short-term
+      bridge, not a cash source. Tracking drawn vs limit is an early
+      warning signal.
+    title_key: facility_id
+    icon: credit
+    category: Cash/Facilities
+    identity:
+      key: [facility_id]
+    fields:
+      - { name: facility_id, type: text, required: true, label: Facility no. }
+      - { name: bank, type: text, label: Bank, salience: summary }
+      - { name: account_iban, type: text, vo: iban, label: Linked account, llm_scope: none, description: The account this line is tied to  }
+      - { name: limit, type: decimal, vo: money_amount, role: limits, format: "currency:EUR", label: Limit, salience: summary, llm_scope: on_prem_only, description: Maximum drawable  }
+      - { name: drawn, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", label: Drawn, salience: summary, llm_scope: on_prem_only, description: Currently drawn (negative balance covered by the line)  }
+      - { name: review_date, type: date, label: Review due, description: When the bank next reviews the line  }
+    derived:
+      - name: headroom
+        type: decimal
+        expr: "limit - drawn"
+        vo: money_amount
+        role: holds
+        format: "currency:EUR"
+        description: Remaining drawable amount = limit − drawn. Materialised; queryable.
+      - name: utilisation
+        type: decimal
+        expr: "@facility_utilisation"
+        description: >-
+          Overdraft-line utilisation = drawn ÷ limit (0..1; → 1.0 = exhausted),
+          via the reusable `@facility_utilisation` Function. Materialised on fold.
+    relations:
+      - name: tied_to
+        target: bank_account
+        via_field: account_iban
+        inverse_name: facilities
+        enforced: true
+        description: The account this overdraft line backs
+
+  # ── authored + CUSTOMER-WRITABLE: the debtor's self-service promise to pay.
+  - name: payment_promise
+    context: receivables
+    display_name: Payment Promise
+    plural: Payment Promises
+    description: >-
+      A debtor's self-service commitment to settle an outstanding receivable by
+      a stated date. Created by the customer (debtor) over the customer Domain
+      surface; the tribe reads it as an early settlement signal.
+    title_key: invoice_id
+    icon: promise
+    category: Receivables/Promises
+    customer_visible: true
+    identity:
+      key: [id]
+      strategy: uuid
+    fields:
+      - { name: id, type: text, label: Promise id, description: "Minted v4 UUID (generate_id on customer create) — the promise handle."  }
+      - { name: invoice_id, type: text, required: true, label: Invoice, salience: summary, description: The outbound receivable the debtor is promising to pay.  }
+      - { name: promised_date, type: date, required: true, label: Promised for, salience: summary, description: The date the debtor commits to pay by.  }
+      - { name: promised_amount, type: decimal, required: true, vo: money_amount, role: owes, format: "currency:EUR", category: Finance/Amounts, label: Promised amount, salience: summary, description: The amount the debtor commits to pay.  }
+      # REQUIRED — the ADR-0157 aging target (the promise's twin of
+      # invoice.aging_state):
+      # the fold seeds the initial member (`open`, first-is-initial) on every
+      # customer create, so the aging rule below never skips an unseeded record.
+      - { name: status, type: enum, enum_values: [open, kept, broken, withdrawn], required: true, label: Status, salience: summary, description: "open until the matching payment lands; then kept / broken / withdrawn."  }
+      - { name: note, type: text, label: Note, description: Optional free-text note from the debtor.  }
+    # ── ADR-0157 aging: a promise whose date has passed while still open is
+    # BROKEN — time-driven, executed as a governed write at the daily tick
+    # (`today()` legal in exactly this seam). Forward-only by construction: once
+    # a settling payment writes `kept` (or the debtor `withdrawn`), status != open
+    # and the rule can never touch the record again. Mirrors the invoice `overdue`
+    # aging above — the second declared aging rule in this example.
+    aging:
+      - field: status
+        from: open
+        becomes: broken
+        when: 'status == "open" && promised_date < today()'
+        description: >-
+          When a payment promise's promised date passes while it is still open,
+          the daily aging tick marks it broken — the debtor did not pay by the
+          date they committed to.
+    relations:
+      # ADR-0226 D1/D2 — a PART, for the same reason as `dunning.chases`: a
+      # promise is a commitment about ONE receivable, and its amount and date
+      # are meaningless detached from it.
+      - name: promises
+        target: invoice
+        via_field: invoice_id
+        inverse_name: promised_by
+        enforced: true
+        strength: part_of
+        description: The receivable the debtor promised to pay
+    # ── The promise closes three ways, one per mechanism (a teaching spread):
+    # `broken` by the AGING rule above (time — the date passed unpaid);
+    # `withdrawn` by the DEBTOR's own low-risk command (the customer surface);
+    # `kept` by the OPERATOR confirming the settling payment landed. Each targets
+    # the promise by its minted id and stamps `status`.
+    commands:
+      - name: withdraw_promise
+        label: Withdraw
+        description: >-
+          Withdraw a payment promise — the debtor retracts their commitment.
+          The debtor's own action over the customer surface (low risk).
+        risk: low
+        rule_key: withdraw.promise
+        key: "{id}"
+        inputs:
+          - { name: id, description: The promise id (from the debtor's create receipt) }
+        fields:
+          - { name: id, from: id }
+          - { name: status, const: withdrawn }
+      - name: mark_promise_kept
+        label: Mark as kept
+        description: >-
+          Mark a payment promise as kept — the promised payment has landed and
+          settled the receivable. Operator-gated (the tribe confirms the money).
+        risk: medium
+        rule_key: keep.promise
+        key: "{id}"
+        inputs:
+          - { name: id, description: The promise id }
+        fields:
+          - { name: id, from: id }
+          - { name: status, const: kept }
+
+  # ── Invoice positions ────────────────────────────────────────────────
+  # What was actually bought. The header carries the total; this carries what
+  # makes it up, so an accountant can ask what a supplier billed and not only
+  # how much. Extracted from the document by the same LLM pass that reads the
+  # header (see the `invoices-inbound-pdf` source's instruction).
+  - name: invoice_position
+    display_name: Invoice Position
+    plural: Invoice Positions
+    # ADR-0201 — a line is true from the day its Beleg is dated, exactly
+    # like the invoice it belongs to.
+    valid_time_field: issued_date
+    icon: list
+    category: Payables/Invoices
+    description: >-
+      One line on an invoice — the article or service as the supplier printed
+      it, with its quantity, unit price and line total.
+    identity:
+      key: [position_id]
+      strategy: explicit
+    # AUTHORED, not `mirror:`. These lines exist because an operator
+    # confirmed what the LLM read off the document — the confirm IS the
+    # authoring act. `mirror:` is for a feed the tribe copies verbatim (the
+    # CSV lane on `invoice`); intake refuses to promote a candidate into a
+    # source-mirror type, and rightly so: nothing mirrors a PDF.
+    state:
+      - name: position_id
+        type: text
+        required: true
+        label: Position
+        description: >-
+          `<invoice_id>-<line no>` — stable across a re-extraction of the same
+          document, so a second read updates the line instead of doubling it.
+      - name: invoice_id
+        type: text
+        required: true
+        label: Invoice
+        description: The invoice this line belongs to.
+      - name: issued_date
+        type: date
+        label: Invoice date
+        description: >-
+          The date printed on the Beleg this line came from. Carried on the
+          LINE, not only on the invoice, because a Stichtag filter reads the
+          field on the record in front of it — without it the lines stand
+          outside time while their invoice moves through it.
+      - name: partner_id
+        type: text
+        label: Supplier
+        description: >-
+          The creditor this line was billed by, looked up from the invoice at
+          intake rather than re-read off the document — the CSV owns who the
+          supplier is, and asking the model to read it again could only agree
+          or contradict.
+      - name: line_no
+        type: int
+        label: "No."
+      - name: description
+        type: text
+        label: Description
+        salience: summary
+        searchable: true
+        description: The article or service as printed.
+      - name: quantity
+        type: decimal
+        label: Quantity
+      - name: unit_price
+        type: decimal
+        label: Unit price
+        vo: money_amount
+      - name: line_total
+        type: decimal
+        label: Line total
+        vo: money_amount
+        description: >-
+          Quantity x unit price AS PRINTED — never recomputed, so a supplier's
+          own rounding stays visible instead of being silently corrected.
+    relations:
+      - name: on_invoice
+        target: invoice
+        # No explicit `kind`: the reference bundle demonstrates INFERENCE, and
+        # a `via_field` edge infers many-to-one on its own.
+        via_field: invoice_id
+        strength: part_of
+        enforced: true
+        description: >-
+          A position has no life without its invoice — so the store refuses one
+          that names an invoice it does not have, rather than letting an
+          orphaned line quietly skew the rollup below.
+      # The supplier. `partner_id` is carried on the LINE (looked up from the
+      # invoice at intake) and said "the creditor this line was billed by" with
+      # nothing declaring the edge — the same omission the estimate types had.
+      #
+      # A REFERENCE, not `part_of`, and unenforced: the precedent is
+      # `dunning.reminds`, the other denormalised partner copy in this model. A
+      # line is part of its INVOICE (`on_invoice` above says so with
+      # `enforced`); the supplier is who that invoice came from, which is a
+      # different statement and is already enforced one hop up.
+      - name: billed_by
+        target: business_partner
+        via_field: partner_id
+        inverse_name: invoice_positions
+        description: The creditor that billed this line
+projections:
+  # Receivables per debtor — a grouped read-model over outbound invoices.
+  - name: debtor
+    context: analytics
+    display_name: Debtor
+    plural: Debtors
+    description: >-
+      A counterparty we are OWED money by. Open receivables roll up here,
+      summed from the partner's outbound invoices; the overdue bucket sums
+      the tribe's own aged verdict (`aging_state`, narrowed to the ones
+      still owed), correct as of the last aging tick. Per-invoice aging stays
+      the read-time days_overdue.
+    icon: receipt
+    color: amber
+    category: Receivables/Debtors
+    key: [partner_id]
+    fields:
+      - { name: partner_id, type: text, description: The business partner this debtor rolls up. }
+      - { name: open_receivables, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", description: Σ outbound invoice amount still awaiting settlement (open includes past-due). }
+      - { name: overdue_amount, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", description: "Σ outbound invoice amount still owed AND marked late — as of the LAST AGING TICK (the fold reads stored fields; the daily ADR-0157 tick is what writes aging_state)." }
+      - { name: open_invoice_count, type: integer, description: Count of the partner's open outbound invoices. }
+    grouped:
+      source: invoice
+      group_by: partner_id
+      # GROUP MEMBERSHIP — a `debtor` is a partner we issue OUTBOUND invoices to.
+      filter:
+        - { field: direction, op: eq, value: outbound }
+      # The overdue bucket folds the AUTHORED `aging_state` — honest
+      # because ADR-0157 made "turns overdue" a WRITE: the daily aging tick
+      # transitions open → overdue, the fold re-runs on that write, so the sum
+      # is correct AS-OF-LAST-TICK (never staler than one day). A fold over a
+      # clock-dependent predicate with no writer was the pre-0157 fiction this
+      # bucket was evicted for (ADR-0156 OQ5); the source `status` still never
+      # carries `overdue` — sub-day precision stays the read-time
+      # `days_overdue` on the invoice.
+      # ── THE EURO SCOPE, and why it is per MEASURE (ADR-0202 D5) ─────────
+      # `amount` is denominated in the invoice's OWN currency. While every
+      # invoice happened to be EUR that was invisible; the moment one dollar
+      # receivable enters the book a plain `sum` adds 12.000 $ to 8.800 € and
+      # reports the result in euro. No error, no warning, a total that is
+      # simply not money. Every money measure in this file therefore says
+      # which currency it is in.
+      #
+      # The COUNTS stay whole, and that is the same "two facts, two fields"
+      # rule `settlement` and `aging_state` follow one type up. "How many
+      # invoices are open" and "how much euro is open" are different
+      # questions, and a debtor showing three open invoices against a euro
+      # total of zero is telling the truth: their exposure is in another
+      # currency, and `fx_exposure_outlook` is where it is priced. Scoping the
+      # count too would have hidden that debtor entirely, which is the worse
+      # of the two wrongs.
+      measures:
+        - name: open_receivables
+          op: sum
+          field: amount
+          filter:
+            - { field: settlement, op: eq, value: open }
+            - { field: currency, op: eq, value: EUR }
+        # BOTH axes, deliberately. `aging_state` alone would keep counting an
+        # invoice that was paid late (the flag is not reset — that is the
+        # point of splitting them), so the measure has to say it wants the
+        # ones still owed.
+        - name: overdue_amount
+          op: sum
+          field: amount
+          filter:
+            - { field: settlement, op: eq, value: open }
+            - { field: aging_state, op: eq, value: overdue }
+            - { field: currency, op: eq, value: EUR }
+        - name: open_invoice_count
+          op: count
+          filter:
+            - { field: settlement, op: eq, value: open }
+
+  # 13-week gross cash movement — a windowed view over booked transactions.
+  - name: cash_flow_13w
+    context: analytics
+    display_name: 13-Week Cash Movement
+    plural: 13-Week Cash Movements
+    description: >-
+      Gross cash movement over a rolling 13-week window — the
+      documentation standard creditors and auditors expect. Computed
+      from booked transactions. GROSS is the honest word here: `amount`
+      is unsigned by declaration (direction carries the sign), so summing
+      it turns money in and money out over one gauge of activity. The
+      signed net is the `cash_movement` projection below, which splits
+      the two with a filtered sum.
+    icon: chart
+    category: Analytics/CashFlow
+    key: []
+    fields: []
+    view:
+      sources: [transaction]
+      dimension_field: date
+      window_days: 91
+      measures:
+        - { name: movement_count, expr: "count(transaction)" }
+        - { name: gross_movement, expr: "sum_exact(transaction.amount)" }
+
+  # ── The four read-models the operator REPORT reads (apps/liquidity-report.yaml).
+  # A `kpi-tile` and a `chart` bind a PROJECTION, never an entity, and the tile's
+  # read is a SUM of the measure across the projection's rows — so a headline
+  # figure has to exist as a measure here before any app can show it. These four
+  # are that: cash on hand, the invoice book, money in vs. out, and the forward
+  # curve. Every one is a grouped fold the store maintains on write; none is
+  # computed in the renderer.
+
+  # Cash on hand, per currency — one row per currency, so a second-currency
+  # account cannot be silently added into a EUR total.
+  - name: cash_position
+    context: analytics
+    display_name: Cash Position
+    plural: Cash Positions
+    description: >-
+      Cash actually on hand, rolled up per currency from the bank
+      accounts' last known balances. The report's headline figure; a
+      negative contribution (an overdrawn account) lowers it, which is
+      the point — this is the number §17 InsO asks about.
+    icon: card
+    color: teal
+    category: Analytics/Cash
+    key: [currency]
+    fields:
+      - { name: currency, type: text, description: The ISO currency this row rolls up. }
+      - { name: total_balance, type: decimal, vo: money_amount, role: holds, format: "currency:EUR", description: Σ of every account's last known balance in this currency. }
+      - { name: account_count, type: integer, description: How many accounts the figure folds. }
+    grouped:
+      source: bank_account
+      group_by: currency
+      measures:
+        - { name: total_balance, op: sum, field: balance }
+        - { name: account_count, op: count }
+
+  # The invoice book, split by direction — "how many invoices, and what do they
+  # still carry" for BOTH sides. `debtor` above answers the same question per
+  # partner and only for receivables; this one is the whole book.
+  - name: invoice_book
+    context: analytics
+    display_name: Invoice Book
+    plural: Invoice Book
+    description: >-
+      Every invoice counted and summed per direction (outbound =
+      receivables owed to us, inbound = payables we owe). Counts include
+      settled invoices; the amounts are the still-open exposure.
+    icon: receipt
+    color: blue
+    category: Analytics/Invoices
+    key: [direction]
+    fields:
+      - { name: direction, type: text, description: "outbound = receivable, inbound = payable." }
+      - { name: invoice_count, type: integer, description: "Every invoice on this side of the book, settled or not." }
+      - { name: open_count, type: integer, description: How many are still awaiting settlement. }
+      - { name: open_amount, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", description: Σ amount still awaiting settlement. }
+      - { name: overdue_amount, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", description: "Σ amount the tribe's own verdict marks overdue — as of the last aging tick (ADR-0157), never staler than a day." }
+    grouped:
+      source: invoice
+      group_by: direction
+      measures:
+        - { name: invoice_count, op: count }
+        - name: open_count
+          op: count
+          filter:
+            - { field: settlement, op: eq, value: open }
+        - name: open_amount
+          op: sum
+          field: amount
+          filter:
+            - { field: settlement, op: eq, value: open }
+            - { field: currency, op: eq, value: EUR }
+        # BOTH axes, deliberately. `aging_state` alone would keep counting an
+        # invoice that was paid late (the flag is not reset — that is the
+        # point of splitting them), so the measure has to say it wants the
+        # ones still owed.
+        - name: overdue_amount
+          op: sum
+          field: amount
+          filter:
+            - { field: settlement, op: eq, value: open }
+            - { field: aging_state, op: eq, value: overdue }
+            - { field: currency, op: eq, value: EUR }
+
+  # Money in vs. money out — the filtered sum `cash_flow_13w` could not express.
+  # Two rows (credit / debit); the net is the difference, which the chief states
+  # and the report shows side by side rather than pretending one signed number.
+  - name: cash_movement
+    context: analytics
+    display_name: Cash Movement
+    plural: Cash Movements
+    description: >-
+      Booked cash movement split by direction — credit is money in,
+      debit is money out, each an exact sum over the unsigned `amount`.
+      This is what makes the unsigned declaration usable: the sign lives
+      in `direction`, so the split has to happen in the fold, not in a
+      reader's head.
+    icon: bank
+    color: blue
+    category: Analytics/CashFlow
+    key: [direction]
+    fields:
+      - { name: direction, type: text, description: "credit = money in, debit = money out." }
+      - { name: total_amount, type: decimal, vo: money_amount, role: moves, format: "currency:EUR", description: Σ of every booked movement in this direction. }
+      - { name: movement_count, type: integer, description: How many bookings the figure folds. }
+    grouped:
+      source: transaction
+      group_by: direction
+      measures:
+        - { name: total_amount, op: sum, field: amount }
+        - { name: movement_count, op: count }
+
+  # The forward curve — open invoices bucketed by the date they FALL DUE, so a
+  # chart can fold them into 13 weekly windows (the `window:` block on a chart
+  # view, ADR-0154 PR3d). Group membership is `status == open`: a settled invoice
+  # is cash that already moved and must not appear in a forecast. Overdue items
+  # sit in PAST buckets and so fall outside a window starting today — deliberate,
+  # and why the report carries an overdue tile beside the curve rather than
+  # folding the past into the future.
+  # DELIBERATELY NO `valid_time_field`, and the reason is a trap worth naming:
+  # `due_date` below calls itself "the forecast's time axis" and is exactly the
+  # WRONG field for this mark. Valid time answers "since when is this fact true
+  # in the world". A forecast row is true TODAY and speaks ABOUT a future date —
+  # marking `due_date` would hide every row until the money is already due, so
+  # a 13-week forecast would show nothing forward-looking, which is the one
+  # thing a forecast is for.
+  #
+  # The same applies to `payment_promise.promised_date` (the promise is made
+  # today, for later) and to master data — `debtor`, `business_partner` — which
+  # has no natural valid time at all. Reading a Stichtag view of those as
+  # historical is a mistake the SURFACE has to prevent; the honest model answer
+  # is to leave the mark off.
+  - name: cash_forecast
+    context: analytics
+    display_name: Cash Forecast
+    plural: Cash Forecast
+    description: >-
+      Expected money in and out per due date, over the open invoices
+      only — the raw material of the 13-week forecast. Expectation, not
+      promise: it assumes every debtor pays on the due date, which is
+      exactly what the DSO and the dunning lane exist to correct.
+    icon: chart
+    color: amber
+    category: Analytics/CashFlow
+    key: [due_date]
+    fields:
+      - { name: due_date, type: date, description: The date these invoices fall due — the forecast's time axis. }
+      - { name: expected_in, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", description: Σ open OUTBOUND amount falling due on this date. }
+      - { name: expected_out, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", description: Σ open INBOUND amount falling due on this date. }
+    grouped:
+      source: invoice
+      group_by: due_date
+      filter:
+        - { field: settlement, op: eq, value: open }
+      measures:
+        - name: expected_in
+          op: sum
+          field: amount
+          filter:
+            - { field: direction, op: eq, value: outbound }
+            - { field: currency, op: eq, value: EUR }
+        - name: expected_out
+          op: sum
+          field: amount
+          filter:
+            - { field: direction, op: eq, value: inbound }
+            - { field: currency, op: eq, value: EUR }
+
+  # The SAME money as `cash_forecast` above, on the day it is expected to
+  # actually arrive instead of the day it is contractually due.
+  #
+  # Reading the two together is the point, and the difference is legible
+  # without arithmetic: BP-004's receivables move about eleven days right,
+  # BP-006's move three days left. A treasury that plans on `cash_forecast`
+  # alone is planning on the assumption its own partner notes say is false.
+  - name: expected_settlement
+    context: analytics
+    display_name: Expected Settlement (Procedure)
+    plural: Expected Settlement (Procedure)
+    description: >-
+      Open receivables on the date the `payment-delay` Procedure expects them
+      to settle, rather than the date they fall due. An ESTIMATE — every
+      figure here is a Schätzung, and the invoices behind it carry the spread
+      and the basis the estimate rests on.
+    icon: chart
+    color: amber
+    category: Analytics/CashFlow
+    key: [expected_payment_date]
+    fields:
+      - { name: expected_payment_date, type: date, description: The date this money is expected to actually arrive — the estimate's time axis. }
+      - { name: expected_in, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", description: Σ receivable amount expected to settle on this date. }
+      - { name: invoice_count, type: integer, description: How many receivables are expected on this date. }
+    grouped:
+      source: settlement_estimate
+      # Same version decision the forward inflow curve makes, for the same
+      # reason: a `sum` over a type keyed `[invoice_id, procedure_version]`
+      # sums ACROSS versions, so the first re-run at v2 would double the
+      # curve. A forecast is always some Procedure's forecast, and moving this
+      # line is part of shipping a refit.
+      filter:
+        - { field: procedure_version, op: eq, value: v1 }
+      group_by: expected_payment_date
+      measures:
+        - name: expected_in
+          op: sum
+          field: amount
+          # The euro scope, same rule as every money measure in this file. The
+          # foreign receivables have their own read-model
+          # (`fx_exposure_outlook`), because their euro value is an ESTIMATE
+          # with a band and summing it into a settlement date curve would
+          # present a range as a figure.
+          filter:
+            - { field: currency, op: eq, value: EUR }
+        - { name: invoice_count, op: count }
+
+  # What the FOREIGN book is worth, per currency, and how sure that is.
+  #
+  # The euro read-models above scope themselves to `currency == EUR` and this
+  # is the other half — the receivables they deliberately leave out, priced at
+  # a recorded rate. Reading them together is the whole open book; reading
+  # either alone is a partial answer that does not say it is partial.
+  #
+  # Grouped by CURRENCY rather than by date, because the question a treasurer
+  # asks of foreign exposure is "how much dollar risk am I carrying", not
+  # "which Tuesday". The band columns are what makes it a risk figure instead
+  # of a converted total.
+  - name: fx_exposure_outlook
+    context: analytics
+    display_name: FX Exposure (Procedure)
+    plural: FX Exposure (Procedure)
+    description: >-
+      Open foreign-currency receivables valued in euro at a recorded reference
+      rate, per currency, with the 80 % band the `fx-exposure` Procedure draws
+      around them. Every figure is a Schätzung, and the band is not decoration
+      — it is how much the euro figure can move before the money arrives.
+    icon: chart
+    color: amber
+    category: Analytics/CashFlow
+    key: [currency]
+    fields:
+      - { name: currency, type: text, description: The currency these receivables are denominated in. }
+      - { name: expected_eur, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", description: "Σ expected euro value at the recorded rates." }
+      - { name: band_low_eur, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", description: "Σ of the low band ends — what this currency is worth if the euro strengthens." }
+      - { name: band_high_eur, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", description: "Σ of the high band ends." }
+      - { name: invoice_count, type: integer, description: How many open receivables stand behind these figures. }
+    grouped:
+      source: fx_valuation
+      group_by: currency
+      # Same version decision the two forward curves make, for the same
+      # reason: the identity key carries the version, so a re-valuation at v2
+      # would double every currency's total.
+      filter:
+        - { field: procedure_version, op: eq, value: v1 }
+      measures:
+        - { name: expected_eur, op: sum, field: expected_eur }
+        - { name: band_low_eur, op: sum, field: band_low_eur }
+        - { name: band_high_eur, op: sum, field: band_high_eur }
+        - { name: invoice_count, op: count }
+
+  # ── The two halves of the weekly forecast surface ────────────────────
+  # `cash_forecast` above is what the BOOKS say: open invoices on their due
+  # dates, i.e. the assumption that everyone pays exactly on time. The two
+  # read-models below are what the VERFAHREN says and what actually
+  # happened — the pair that makes an estimate checkable instead of
+  # decorative. A chart binds a projection, never an entity (ADR-0154), so
+  # neither curve could be drawn without these.
+
+  # What the Procedure expects, per date it is about.
+  - name: cash_inflow_outlook
+    context: analytics
+    display_name: Expected Inflow (Procedure)
+    plural: Expected Inflow (Procedure)
+    description: >-
+      The `cash-forecast` Procedure's estimates, one row per date they are
+      ABOUT. An ESTIMATE — every figure here is a Schätzung from a fitted
+      model, never a booked amount, and it is the forward half of the pair
+      whose backward half is `cash_inflow_actual`.
+    icon: chart
+    color: amber
+    category: Analytics/CashFlow
+    key: [target_date]
+    fields:
+      - { name: target_date, type: date, description: The date these estimates are about — the forecast's time axis. }
+      - { name: expected_inflow, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", description: Σ of the estimates standing for this date. }
+      # Kept, and now it means something else. It used to be the only warning
+      # that a second Procedure version would double the sum; the `filter`
+      # below prevents that instead. What it still catches is the case the
+      # filter cannot: TWO estimates for one date at the SAME version, which
+      # the identity key permits and which would mean the re-run wrote a
+      # second row rather than replacing one. 1 is the healthy reading.
+      - { name: estimate_count, type: integer, description: "How many estimates stand for this date at the reported version — 1 is healthy." }
+    grouped:
+      source: cash_inflow_estimate
+      group_by: target_date
+      # THE version decision this release owes (the note this field used to
+      # carry deferred it here). A `sum` over a type keyed
+      # `[target_date, procedure_version]` sums ACROSS versions, so the moment a
+      # re-run writes v3 rows beside v4 the forward curve silently doubles.
+      #
+      # `group_by` takes one field, so `(target_date, version)` is not
+      # expressible and `latest` is not an available op. The read therefore
+      # NAMES the version it reports, which is also the honest thing for a
+      # chart an operator reads as "the forecast": a forecast is always some
+      # Procedure's forecast. Refitting is a deliberate act, and moving this
+      # line is part of it — the same commit that ships v4 says the chart now
+      # shows v4.
+      filter:
+        - { field: procedure_version, op: eq, value: v4 }
+      measures:
+        - { name: expected_inflow, op: sum, field: expected_inflow }
+        - { name: estimate_count,  op: count }
+
+  # The v3-vs-v4 read: what each Procedure version has on the books.
+  - name: cash_inflow_by_version
+    context: analytics
+    display_name: Expected Inflow by Procedure Version
+    plural: Expected Inflow by Procedure Version
+    description: >-
+      One row per Procedure version, over the estimates that version
+      produced. Empty of meaning while a single version is live — it earns
+      its keep after a refit, when `procedure_rerun` has recomputed a stretch
+      with the superseded version and the question becomes "how far apart are
+      they".
+    icon: chart
+    color: slate
+    category: Analytics/CashFlow
+    key: [procedure_version]
+    fields:
+      - { name: procedure_version, type: text, description: The Procedure version these estimates claim. }
+      - { name: expected_inflow, type: decimal, vo: money_amount, role: owes, format: "currency:EUR", description: Σ of everything this version estimated. }
+      - { name: estimate_count, type: integer, description: How many estimates this version stands behind. }
+    grouped:
+      source: cash_inflow_estimate
+      group_by: procedure_version
+      # No filter: the whole point is to see every version at once. The sum
+      # is over DIFFERENT DATE RANGES per version unless a re-run covered the
+      # same stretch, so it compares totals honestly only when the counts
+      # match — which is what `estimate_count` is here to show.
+      measures:
+        - { name: expected_inflow, op: sum, field: expected_inflow }
+        - { name: estimate_count,  op: count }
+
+  # What actually came in, per day money landed.
+  - name: cash_inflow_actual
+    context: analytics
+    display_name: Actual Inflow
+    plural: Actual Inflow
+    description: >-
+      Receivables that actually settled, summed on the day the money
+      landed. The measured half the Procedure's estimate is judged
+      against.
+    icon: bank
+    color: green
+    category: Analytics/CashFlow
+    key: [paid_date]
+    fields:
+      - { name: paid_date, type: date, description: The day these receivables settled. }
+      - { name: actual_inflow, type: decimal, vo: money_amount, role: holds, format: "currency:EUR", description: Σ settled OUTBOUND invoice amount that landed on this day. }
+      - { name: settlement_count, type: integer, description: How many receivables settled that day. }
+    grouped:
+      source: invoice
+      group_by: paid_date
+      # Both predicates are group MEMBERSHIP, not measure narrowing, and
+      # that is the point: an unsettled invoice carries an EMPTY
+      # `paid_date`, so without `settlement == paid` every open item in the
+      # book would collapse into one empty-key group — a row that reads as
+      # "money that landed on no date". Direction is the second half: an
+      # inbound invoice settling is money going OUT.
+      filter:
+        - { field: direction,  op: eq, value: outbound }
+        - { field: settlement, op: eq, value: paid }
+      measures:
+        # The euro scope, for the reason spelled out on `debtor` above: the
+        # backward curve is compared bar-for-bar against the Procedure's
+        # forward one, and a mixed-currency actual would make that comparison
+        # meaningless in the one place it is supposed to be checkable.
+        - name: actual_inflow
+          op: sum
+          field: amount
+          filter:
+            - { field: currency, op: eq, value: EUR }
+        - { name: settlement_count,  op: count }
+
+# ── Layer B — the ACL / Source-Binding (ADR-0108 §3.3). The connectors, the
+# per-source cadence, and the column→field mapping live HERE, separate from the
+# domain aggregates above, so the model stays vendor-agnostic. The compiler
+# lowers each binding to the same `intake_source` + `intake_config` registry
+# records the hand-authored `ontology/sources/*.yaml` + `data/*.intake.yaml`
+# produce (proven byte-for-byte by the compiler's source/mapping oracle tests).
+# `connector`/`adapter` are omitted → the born-with folder + csv defaults; the
+# intake `key` is omitted → derived from each target aggregate's identity key.
+  # ── What the lines add up to ─────────────────────────────────────────
+  # Exists so `invoice-positions-check` can compare it against the header's
+  # amount. A rollup, not a rule: the rule is the flow.
+  - name: invoice_positions_total
+    context: analytics
+    display_name: Invoice Positions Total
+    plural: Invoice Position Totals
+    icon: sigma
+    category: Payables/Invoices
+    description: >-
+      What an invoice's own line items add up to, and how many were read.
+    key: [invoice_id]
+    grouped:
+      source: invoice_position
+      group_by: invoice_id
+      measures:
+        - { name: positions_total, op: sum, field: line_total }
+        - { name: position_count,  op: count }
+    fields:
+      - name: invoice_id
+        type: text
+        description: The invoice these lines roll up to.
+      - name: positions_total
+        type: decimal
+        description: Sum of the line totals, as printed.
+      - name: position_count
+        type: integer
+        description: How many lines the extraction read.
+sources:
+  # NOTE: Triggers below are shortened to demo/E2E cadence so the example
+  # reacts promptly to sample CSV feeds. In production these would stay on
+  # their natural schedules (master data quarterly, bank hourly, invoices
+  # daily). See `bank-transactions` for an hourly reference.
+
+  # Master data barely moves — refresh hourly in this demo so the source is
+  # armed; no new files are expected after the initial seed. A 1:1 auto-intake feed.
+  - slug: business-partners
+    name: Business Partner Master Data
+    locator: inbox/business-partners
+    target_type: business_partner
+    trigger:
+      - { kind: cron, expr: "0 * * * *" }
+    # ADR-0112 — the shape lives on `extractor.config`, the ONE authoring
+    # surface. Columns only (no `mapping`) is the ADR-0065 D5 1:1 auto-intake:
+    # the runner derives the identity map from the target type's fields, and
+    # the dedup key falls back to the aggregate's identity key.
+    extractor:
+      mechanism: tabular
+      config:
+        columns: [partner_id, name, role, iban, payment_terms_days, cash_discount_percent, cash_discount_days, city, notes, telegram_chat_id]
+
+  # Bank movements change all day — pull hourly. A 1:1 auto-intake feed.
+  - slug: bank-transactions
+    name: Bank Transactions
+    locator: inbox/bank-transactions
+    target_type: transaction
+    trigger:
+      - { kind: cron, expr: "0 * * * *" }
+    extractor:
+      mechanism: tabular
+      config:
+        columns: [date, amount, direction, counterparty, counterparty_iban, description, reference, account_iban]
+
+  # Receivables — shortened to a 2-minute demo cadence so sample outbound
+  # invoice CSVs are picked up promptly. `depends_on` still enforces the
+  # invoice→partner edge ingest after the partner master (ADR-0086 §8).
+  # The per-shape field map carries the two non-1:1 facts of this feed:
+  # `customer_id` → `partner_id` rename, and `direction` as a per-FILE constant.
+  - slug: invoices-outbound
+    name: Outbound Invoices
+    locator: inbox/invoices-outbound
+    target_type: invoice
+    depends_on: [business-partners]
+    trigger:
+      - { kind: cron, expr: "*/2 * * * *" }
+    extractor:
+      mechanism: tabular
+      config:
+        columns: [invoice_id, issued_date, due_date, paid_date, amount, currency, customer_id, status, payment_terms_days]
+        mapping:
+          - { column: invoice_id, field: invoice_id, ty: text }
+          - { column: issued_date, field: issued_date, ty: date }
+          - { column: due_date, field: due_date, ty: date }
+          - { column: paid_date, field: paid_date, ty: date }
+          - { column: amount, field: amount, ty: decimal }
+          - { column: currency, field: currency, ty: text }
+          - { column: customer_id, field: partner_id, ty: text } # rename
+          - { column: status, field: status, ty: text }
+          - { column: payment_terms_days, field: payment_terms_days, ty: int }
+          - { field: direction, value: outbound, ty: text } # per-file constant
+
+  # Payables — the supplier invoices we received. Shortened to a 2-minute demo
+  # cadence so sample inbound invoice CSVs are picked up promptly. Same target
+  # aggregate, a DISTINCT shape (its own fingerprint → its own intake_config):
+  # `supplier_id` instead of `customer_id`, plus the cash_discount columns; the
+  # per-file constant is `direction: inbound`.
+  - slug: invoices-inbound
+    name: Inbound Invoices
+    locator: inbox/invoices-inbound
+    target_type: invoice
+    depends_on: [business-partners]
+    trigger:
+      - { kind: cron, expr: "*/2 * * * *" }
+    extractor:
+      mechanism: tabular
+      config:
+        columns: [invoice_id, issued_date, due_date, paid_date, amount, currency, supplier_id, status, payment_terms_days, cash_discount_percent, cash_discount_days]
+        mapping:
+          - { column: invoice_id, field: invoice_id, ty: text }
+          - { column: issued_date, field: issued_date, ty: date }
+          - { column: due_date, field: due_date, ty: date }
+          - { column: paid_date, field: paid_date, ty: date }
+          - { column: amount, field: amount, ty: decimal }
+          - { column: currency, field: currency, ty: text }
+          - { column: supplier_id, field: partner_id, ty: text } # rename
+          - { column: status, field: status, ty: text }
+          - { column: payment_terms_days, field: payment_terms_days, ty: int }
+          - { column: cash_discount_percent, field: cash_discount_percent, ty: int }
+          - { column: cash_discount_days, field: cash_discount_days, ty: int }
+          - { field: direction, value: inbound, ty: text } # per-file constant
+
+  # Payables that arrive as SCANNED PDFs or DOCX files, not a clean CSV export
+  # — the DOCUMENT connector (ADR-0126 Phase 3). Same target aggregate as the
+  # CSV payables feed, but a document `extractor:` turns each file into a
+  # candidate invoice, so the source fold is [ingest, extract,
+  # ingest-candidates] and the walk runs per FILE. The explicit `source` process
+  # below extends this feed with an ENRICH step between extract and the governed
+  # admit — the operator authors intent per connector; the connector complexity
+  # stays under the waterline. `direction: inbound` is the per-file constant, as
+  # on the CSV feed.
+  #
+  # ADR-0089 — full-text indexing: each PDF/DOCX is indexed into the `documents`
+  # corpus, and `index_options.per_page: true` makes the search-indexer emit one
+  # corpus entry per page instead of one per file. That lets an operator search
+  # inside multi-page scans and land on the exact page.
+  - slug: invoices-inbound-pdf
+    name: Inbound Invoices (PDF/DOCX Scan)
+    locator: documents/inbound-invoices
+    target_type: invoice
+    depends_on: [business-partners]
+    trigger:
+      - { kind: cron, expr: "0 7 * * *" }
+    filter:
+      include_ext: [pdf, docx]
+    index_corpora: [documents]
+    index_options:
+      per_page: true
+    constants:
+      - { field: direction, value: inbound, ty: text }
+    # NO extractor. This door makes the documents FINDABLE; it does not read
+    # invoice headers off them.
+    #
+    # `invoice` is fed by `invoices-inbound` (CSV) and is therefore a
+    # source-mirror type. Intake promotes a confirmed candidate only into an
+    # AUTHORED type, so an llm-extractor here produced a candidate per document
+    # that could never become a record: the run cost a model call per file and
+    # left the operator a queue that does not drain. Measured live — every
+    # candidate refused with `target type invoice is SourceMirror`.
+    #
+    # It is also the wrong question to ask. The CSV carries the booked figures;
+    # re-reading the same amount off the scan can only ever agree with it or
+    # contradict it, and neither is worth a model call. What the document knows
+    # and the CSV does not is its LINE ITEMS — read by `invoice-positions-pdf`
+    # into a type that is authored precisely because the document is its
+    # origin.
+
+  # The SAME documents, read a second time for their LINE ITEMS.
+  #
+  # A separate source and not a second instruction on the one above, because an
+  # extraction candidate is bound to exactly ONE `target_type`: the worker reads
+  # that type from the ontology and BUILDS the prompt from its fields, so asking
+  # the `invoice` extraction for position fields has nowhere to put them and the
+  # candidate parser drops them. Measured on a live run — nine documents came
+  # back with clean headers and no lines at all.
+  #
+  # `cardinality: {unit: document, rows: n}` is what says "many per document"
+  # (ADR-0112: `rows: n` — data-dependent, line items). The header source keeps
+  # the default one-per-document.
+  #
+  # The prompt for this comes from `invoice_position`'s own FIELD DESCRIPTIONS —
+  # the extract-worker renders each as a per-field hint, so the accountant tunes
+  # extraction by describing their columns, not by writing a prompt. The
+  # `custom_instruction` here says only what a field description cannot: where
+  # on the page to look.
+  - slug: invoice-positions-pdf
+    # PDF only in the NAME too: the filter below takes `[pdf]`, and a name that
+    # promised DOCX had the operator looking for line items from documents this
+    # door never reads.
+    name: Inbound Invoice Line Items (PDF)
+    locator: documents/inbound-invoices
+    target_type: invoice_position
+    depends_on: [invoices-inbound-pdf]
+    trigger:
+      - { kind: cron, expr: "30 7 * * *" }
+    filter:
+      # PDF only. The DOCX siblings in the same folder are documents for
+      # invoices this seed does not book — they belong to the multi-page /
+      # scan-split scenarios. A position is `part_of` its invoice with
+      # `enforced: true`, so a line for an unbooked invoice is refused at
+      # confirm (`dangling-relation`) — correctly. Reading them here would
+      # manufacture that refusal on every run and cost a model call for it.
+      # They stay indexed and findable through `invoices-inbound-pdf`.
+      include_ext: [pdf]
+    extractor:
+      mechanism: llm-extractor
+      trust: needs-confirmation
+      max_concurrent: 4
+      cardinality:
+        unit: document
+        rows: n
+      tuning:
+        custom_instruction: >-
+          The line items sit under the `Positionen:` heading, one row each. Number
+          them in the order they appear and set `position_id` to
+          `<invoice number>-<row number>`, so a re-read updates a line instead of
+          doubling it. Set `issued_date` on EVERY line to the
+          invoice date printed in the header (`Rechnungsdatum`) — the same value
+          on each. It is what puts the lines on the same time axis as the
+          invoice they belong to.
+
+  # Credit-bureau CREDIT REPORT that arrives as a PDF — the REALISTIC sibling
+  # of the `partner-credit-lookup` cross-tribe fetch below. A Schufa/Creditreform
+  # result almost never comes as a clean REST/offer read; it is a document you
+  # extract the rating out of. Same DOCUMENT connector as the PDF payables feed:
+  # a per-file walk [ingest, extract, ingest-candidates] whose extractor pulls
+  # the partner id + the external rating and lands it on `credit_assessment` via
+  # the confirm gate. Both doors target the SAME `credit_assessment` datum — the
+  # fetch is the clean exception, this intake concretely LANDS it and is the
+  # dominant real-world path (ADR-0176 Context).
+  # No sample documents ship here (unlike the invoice door): a real credit report
+  # is a third-party document, so the source is declared and armed, but empty
+  # until one lands.
+  #
+  # ADR-0089 — same full-text indexing as the invoice scan: PDF/DOCX credit
+  # reports are indexed into the `documents` corpus with one entry per page.
+  - slug: partner-credit-report-pdf
+    name: Credit Report (PDF/DOCX)
+    locator: documents/credit-reports
+    target_type: business_partner
+    depends_on: [business-partners]
+    trigger:
+      - { kind: cron, expr: "0 6 * * *" }
+    filter:
+      include_ext: [pdf, docx]
+    index_corpora: [documents]
+    index_options:
+      per_page: true
+    extractor:
+      mechanism: llm-extractor
+      trust: needs-confirmation
+      max_concurrent: 4
+      tuning:
+        custom_instruction: >-
+          Extract one credit report per document: partner_id (the counterparty id as
+          printed) and credit_assessment (the bureau rating/class as printed,
+          e.g. a Creditreform credit index or a Schufa class). Ignore all other
+          fields — this door only updates the counterparty's external rating.
+
+# ── Layer B — the constitutional PROCESSES (ADR-0118 D14) ────────────────────
+# Business rules the operator states as "when X happens, do Y", compiled to
+# FLOWS (ADR-0118 compiled flow records; at this authoring surface it is a
+# flow — the `flow_declare`/`flow_feed` word — the sibling of the length-1
+# `sources:` folds above). These supersede the runtime-authored
+# `flow_declare`/on-upsert forms: the rule now lives in the constitution and is
+# compiled, not scripted. Between them they exercise all four ADR-0118
+# trigger kinds and the D10 branching flow:
+#   • `new`    — dunning-escalation: a fresh dunning → notify the debtor;
+#                invoice-screening: a filed invoice → route by urgency (the
+#                multi-stage, record-granular branching flow).
+#   • `change` — receivables-overdue: the daily aging tick (ADR-0157) writes
+#                aging_state current → overdue, and the chase fires on that
+#                write ("turns overdue" is time — and time is now a WRITE).
+#   • `source` — invoices-inbound: the payables feed EXTENDS its own folder
+  # ── ADR-0202 D5 — the ECB reference rates, and the only source in this
+  # tribe that leaves the building.
+  #
+  # THIS IS THE IMPURE HALF the determinism profile forces into existence. The
+  # `fx-exposure` Procedure may not fetch a rate — D10.3's import allow-list
+  # carries no sockets and no http — so the fetch happens here, governed, and
+  # the rate reaches the model as a stored field.
+  #
+  # No connector was written for it. An `https` locator resolves to the
+  # bundled `web-connector`, which owns none of the socket: the HOST parses
+  # the URL, enforces the default-deny `system/egress.yaml`, applies the
+  # timeout and writes the `audit.egress` row (ADR-0090). The operator grants
+  # `data-api.ecb.europa.eu` once, and the grant is what an auditor reads
+  # later — not a line in this file.
+  #
+  # WHY THE DATA API AND NOT THE FAMILIAR eurofxref FILES: the classic
+  # download page offers CSV only inside a .zip, and its unpacked form is XML.
+  # Neither reaches the deterministic intake door, which reads csv / json /
+  # xlsx — XML would fall through to the DOCUMENT door, i.e. an LLM reading
+  # exchange rates out of markup. For a figure that anchors an audited
+  # valuation that is precisely the wrong tool. The data API answers
+  # `text/csv` uncompressed, with no key and no registration.
+  #
+  # `lastNObservations=1` fetches the newest quote per currency. Rates publish
+  # around 16:00 CET, so an afternoon cadence is honest: pulling at 09:00
+  # re-reads yesterday's row, which upserts onto the same key and changes
+  # nothing.
+  - slug: ecb-fx
+    name: ECB Euro Reference Rates
+    locator: "https://data-api.ecb.europa.eu/service/data/EXR/D.USD+GBP+CHF.EUR.SP00.A?format=csvdata&lastNObservations=1"
+    target_type: fx_rate
+    trigger:
+      - { kind: cron, expr: "0 17 * * 1-5" }
+    extractor:
+      mechanism: tabular
+      config:
+        # The SDMX response carries 32 columns. All of them are named because
+        # `columns` is the shape fingerprint — a short list would not match the
+        # file — and exactly three are mapped, because the other 29 are series
+        # metadata this tribe has no reader for. A declared field nothing reads
+        # is the house rule's "expose now, wire later".
+        columns: [KEY, FREQ, CURRENCY, CURRENCY_DENOM, EXR_TYPE, EXR_SUFFIX, TIME_PERIOD, OBS_VALUE, OBS_STATUS, OBS_CONF, OBS_PRE_BREAK, OBS_COM, TIME_FORMAT, BREAKS, COLLECTION, COMPILING_ORG, DISS_ORG, DOM_SER_IDS, PUBL_ECB, PUBL_MU, PUBL_PUBLIC, UNIT_INDEX_BASE, COMPILATION, COVERAGE, DECIMALS, NAT_TITLE, SOURCE_AGENCY, SOURCE_PUB, TITLE, TITLE_COMPL, UNIT, UNIT_MULT]
+        mapping:
+          - { column: CURRENCY, field: currency, ty: text }
+          - { column: TIME_PERIOD, field: rate_date, ty: date }
+          # TEXT, not decimal: the ECB quotes USD and CHF to four decimals and
+          # GBP to five, and one fixed scale would round one of them on the way
+          # in. `TITLE_COMPL` also contains commas and arrives quoted, which is
+          # why this goes through the CSV adapter and never a hand split.
+          - { column: OBS_VALUE, field: rate_per_eur, ty: text }
+
+#                source (same slug — the takeover) with steps AFTER the ingest:
+#                each per-file partial run gathers at an ADR-0128 barrier and
+#                ONE operator notice goes out per pull (the batch-collapse).
+#                Granularity is two-lane by design: the connector walk carries
+#                per-FILE runs (fan-out) or one batch item (sequential path) —
+#                record-FIELD routing belongs on a `new`/`change` process.
+#   • `handoff`— dunning-notice: a partner tribe hands a dunning in → send it.
+# A single-review `new`/`change` process is the reactive-worker shorthand
+# (length-1); with more steps or a `flow:` it compiles to a multi-stage
+# reactive flow the store walks per written record (ADR-0118 PR-12).
+processes:
+  # WORKER — when a dunning is raised, deliver the notice DETERMINISTICALLY
+  # (ADR-0124 proof point): look the debtor's chat id up from the partner
+  # record (`lookup`), render the notice from the level (`template`), send it,
+  # and record the send (`on_done` — ADR-0127) — zero LLM turns. No debtor or
+  # no chat id is an audited stop (the worker's old "SKIP and note the skip",
+  # now a fail-closed edge). An out-of-scale level (> 3) goes to the agentic
+  # judge — which is ALSO the v1 fallback worker a runtime without the
+  # multi-stage walk dispatches for every new dunning (the entry binding's
+  # single-worker fold), so the reaction never silently disappears.
+  - slug: dunning-escalation
+    name: Dunning Dispatch
+    description: >-
+      When a dunning is raised, deliver the notice to the debtor over Telegram —
+      deterministically: look up the debtor's chat id, render the notice from
+      the level, send it, record the send. No recipient is an audited stop; an
+      out-of-scale level goes to the judging worker.
+    on: { new: dunning }
+    steps:
+      - { id: route, does: check }   # pass-through router — the guards live on its edges
+      - id: enrich                   # ADR-0124 lookup: the agentic atlas_get_record → a governed read
+        does: check
+        using: lookup
+        config:
+          from: business_partner
+          key: partner_id
+          select: { chat_id: telegram_chat_id }
+          on_missing: keep           # a missing partner == a missing chat id → the stop edge below
+      - id: render                   # ADR-0124 template: LLM prose → a deterministic body
+        does: check
+        using: template
+        config:
+          into: text
+          render: >-
+            {{ if(level == 1, "Friendly reminder", if(level == 2, "Formal notice",
+            "FINAL DEMAND (pre-legal)")) }}: invoice {{ invoice_id }} is overdue —
+            outstanding {{ amount }} EUR. Please settle it promptly.
+            (Dunning level {{ level }}.)
+      - id: send
+        does: notify
+        using: telegram-send
+        note: "Stub: Telegram delivery needs a bot token + egress binding to actually send; without it the send step is a no-op you can watch in the run rows."
+        on_done:                     # ADR-0127 — record the send AFTER it succeeded
+          to: dunning
+          key: id
+          set: { status: '"sent"' }
+      - { id: judge, does: review, using: dunning-notifier, note: "Stub: agentic fallback — needs an LLM model pinned (workers[i].model or manifest.default_model) to run." }   # v1 fallback + out-of-scale judgement
+    flow:
+      - { from: route,  when: 'level > 3',        to: judge }
+      - { from: route,  when: 'partner_id != ""', to: enrich }
+      - { from: route,  otherwise: true,          to: "stop: no-debtor" }
+      - { from: enrich, when: 'chat_id != ""',    to: render }
+      - { from: enrich, otherwise: true,          to: "stop: no-recipient" }
+      - { from: render, to: send }
+      - { from: judge,  to: "done: judged" }
+
+  # RECEIVABLES CHASE — restored as a reactive flow by ADR-0157. The
+  # pre-0156 version of this process rode a fiction (a `change: {becomes:
+  # overdue}` on the MIRROR status no export ever delivers — the OQ5
+  # eviction); now the invoice's `aging:` rule above makes "turns overdue" a
+  # real WRITE (the daily tick transitions aging_state current → overdue),
+  # so the trigger below fires honestly: the aging write walks this process,
+  # `receivables-chaser` raises the level-1 dunning as a governed record
+  # write, and `dunning-escalation` above delivers it to the debtor —
+  # deterministic, Chief-free, every hop a recorded write. The blueprint's
+  # `receivables-chased` judge (ADR-0049) stays as the agentic BACKSTOP
+  # (mission-level "every overdue receivable has a next step"), no longer
+  # the only lane.
+  - slug: receivables-overdue
+    name: Overdue Receivables
+    description: >-
+      When a receivable turns overdue (the daily aging tick writes the
+      tribe's verdict), raise a first-level dunning to chase the debtor.
+    on: { change: { aggregate: invoice, field: aging_state, becomes: overdue } }
+    steps:
+      # The trigger cannot say WHICH side of the book it watches — a
+      # `change:` names an aggregate and a field, never a predicate on the
+      # record. `invoice` is both sides, and the `aging:` rule above ages
+      # both (deliberately: "we are late paying" is worth knowing too), so
+      # the chase has to say so itself. Same deterministic router the
+      # screening process uses: an exclusive port, first match wins, no
+      # worker spent on deciding.
+      - { id: side, does: check }
+      - { id: chase, does: review, using: receivables-chaser, note: "Stub: agentic worker — needs an LLM model pinned to run (apply warns when none is set)." }
+    flow:
+      # Only a RECEIVABLE has a debtor to chase.
+      - { from: side, when: 'direction == "outbound"', to: chase }
+      # An overdue PAYABLE is our own late payment — a real fact, and none of
+      # this process's business. Halting here is audited and costs no LLM turn.
+      - { from: side, otherwise: true, to: "stop: not-a-receivable" }
+      - { from: chase, to: "done: chased" }
+
+  # SCREENING — route each FILED invoice by urgency (ADR-0118 D10 conditioned
+  # edges, record-granular). The connector flow deliberately ENDS at its ingest
+  # Sink-Data (the folder feed above stays a plain filing step): a connector run
+  # travels as ONE batch item, so per-invoice fields never reach its edges. The
+  # routing lives HERE instead — a reactive multi-stage process on the invoice
+  # type: each committed write walks its own run, so the `check` step's edges
+  # read the invoice's OWN fields. An EXCLUSIVE port, first match wins: a
+  # cancelled arrival is noise and halts at the door; a cash_discount-window-open
+  # payable is flagged deterministically; everything else is just filed. The
+  # accountant sees "filed / flagged / stopped: cancelled" in the run rows,
+  # never the routing grammar. (No overdue edge: an ARRIVING invoice's source
+  # status is never `overdue` — aging is time, and time enters as the daily
+  # aging WRITE on `aging_state`, which the receivables-overdue process
+  # above reacts to; sub-day reads stay `days_overdue`.)
+  - slug: invoice-screening
+    name: Invoice Triage
+    description: >-
+      When an invoice is filed, route it by urgency: a cancelled arrival stops;
+      a cash_discount-open payable is flagged; the rest is filed.
+    on: { new: invoice }
+    steps:
+      - { id: screen, does: check }   # deterministic router (pass-through), no worker
+    flow:
+      # A cancelled invoice arriving is noise — halt before any further work.
+      - { from: screen, when: 'status == "cancelled"', to: "stop: cancelled-payable" }
+      # Inside the early-payment (cash_discount) window → flag deterministically.
+      - { from: screen, when: 'cash_discount_percent > 0',   to: "done: flagged-cash-discount" }
+      # Everything else is filed as-is — no worker spent on a payable that needs none.
+      - { from: screen, otherwise: true, to: "done: filed" }
+
+  # LINK (ADR-0126 D2) — when a payment executes, record the settlement as a
+  # REIFIED edge to the invoice it paid, carrying the settled amount and date as
+  # edge properties. `does: link` is a governed Sink-Data write on the built-in
+  # `link` mechanism (no worker, no LLM): it authors the `payment__settlement`
+  # edge from the payment (src) to its invoice (dst) and passes the payment
+  # through unchanged. Because it is a reified edge, one invoice settled by two
+  # partial payments carries TWO settlement edges, each with its own amount — the
+  # many-to-many-with-data a scalar foreign key cannot express.
+  - slug: payment-settlement-edge
+    name: Payment Settlement Link
+    description: >-
+      When a payment executes, link it to the invoice it settled — a reified
+      edge carrying the settled amount and date, so partial settlements each
+      keep their own figure.
+    on: { change: { aggregate: payment, field: status, becomes: executed } }
+    steps:
+      # A deterministic router (no worker) guards the link: an executed payment
+      # missing its invoice_id is an audited stop, not a dangling edge write.
+      - { id: gate, does: check }
+      - id: link
+        does: link
+        config:
+          of: payment
+          relation: settlement
+          src: id
+          dst: invoice_id
+          fields:
+            settled_amount: amount
+            settled_on: executed_date
+    flow:
+      - { from: gate, when: 'invoice_id != ""', to: link }
+      - { from: gate, otherwise: true,          to: "stop: no-invoice" }
+      - { from: link, to: "done: linked" }
+
+  # FETCH (ADR-0118) — when a new DEBTOR is onboarded, get their credit
+  # assessment from a partner credit-bureau tribe's OFFER. `does: fetch` calls a
+  # cross-tribe pipeline (`using: pipeline:<tribe>/<offer>`), resolved when this
+  # tribe activates against the live bus (the reference is authoring-time
+  # advisory, the same shape the `dunning-notice` export below rides — this
+  # process is the symmetric INBOUND, this tribe as the CALLER). A creditor
+  # (we owe them) needs no receivables-risk check, so the router stops there.
+  #
+  # This is the CLEAN acquisition shape (a structured read), and it is the
+  # EXCEPTION: it only works when the bureau is itself a Wild tribe exposing an
+  # offer. The realistic case — a Schufa/Creditreform result arriving as a PDF —
+  # is the `partner-credit-report-pdf` DOCUMENT source above (intake + extract),
+  # which concretely lands the `credit_assessment` datum via the confirm gate.
+  # This flow is the CLEAN-case alternative that would supply the same datum; the
+  # file ships both so the two acquisition shapes stand side by side (ADR-0176
+  # Context). (Illustrative: the cross-tribe pipeline reference resolves only
+  # against a live bureau tribe; the fetch's own store step is left to that
+  # integration — the intake door is the one that lands data in this example.)
+  - slug: partner-credit-lookup
+    name: Credit Assessment Lookup
+    description: >-
+      When a new debtor is onboarded, fetch their credit assessment from a
+      partner credit-bureau tribe's offer — the cross-tribe read that mirrors
+      our own dunning-delivery export.
+    on: { new: business_partner }
+    steps:
+      # Deterministic router (no worker): only a debtor carries receivables risk.
+      - { id: triage, does: check }
+      - id: assess
+        does: fetch
+        using: pipeline:credit-bureau/partner-credit-check
+        note: "Stub: no credit-bureau tribe is deployed, so this cross-tribe fetch resolves nothing at run time. The realistic path is the partner-credit-report-pdf document door (intake + extract)."
+    flow:
+      - { from: triage, when: 'role == "debtor"', to: assess }
+      - { from: triage, otherwise: true,          to: "stop: not-a-debtor" }
+      - { from: assess, to: "done: assessed" }
+
+  # EFFECT — offer the dunning notice to a partner tribe (an exported effect: a
+  # length-1 Sink-Effect over the Telegram sender, granted across the boundary).
+  - slug: dunning-notice
+    name: Dunning Delivery
+    description: "Deliver a dunning notice over Telegram; offered to a partner tribe."
+    on: { handoff: { from: [acme-partner] } }
+    accepts: dunning
+    steps:
+      - { id: send, does: notify, using: telegram-send, note: "Stub: Telegram delivery needs a bot token + egress binding to actually send." }
+
+  # WORKER (logic) — when an invoice is filed, DECIDE its validity from its own
+  # fields and halt a bad one — no worker, no LLM (ADR-0144 D1/D4 dogfood). The
+  # `validate` step is a pure `map` that adds `reference_ok` / `amount_ok`; the
+  # `triage` step is a `does: decide` rule table over those fields that stamps a
+  # top-level `resolution`; the edges route on it. The routing/triage decision
+  # that used to be wired to an agentic `liquidity-triage` worker never needed
+  # one — it is a rule over fields, so it is logic. The flow now ARMS with zero
+  # workers (D16 resolves the `decision` host built-in directly).
+  - slug: invoice-dual-check
+    name: Invoice Double-Check
+    description: >-
+      When an invoice is filed, decide its validity from its own fields;
+      a failing invoice halts, a clean one is filed — zero workers, zero LLM.
+    on: { new: invoice }
+    steps:
+      - id: validate
+        does: check
+        using: map
+        config:
+          set:
+            reference_ok: 'if(invoice_id != "", 1, 0)'
+            amount_ok: 'if(amount > 0, 1, 0)'
+      - id: triage
+        does: decide
+        config:
+          rules:
+            - { when: 'reference_ok == 0', resolution: invalid }
+            - { when: 'amount_ok == 0',    resolution: invalid }
+          default_resolution: valid
+    flow:
+      - { from: validate, to: triage }
+      # A bad reference or amount halts the run — no worker spent on a broken invoice.
+      - { from: triage, when: 'resolution == "invalid"', to: "stop: invalid-invoice" }
+      - { from: triage, otherwise: true, to: "done: checked" }
+
+  # CONNECTOR (ADR-0128 batch-collapse dogfood) — the payables feed EXTENDS its
+  # own source (the process slug EQUALS the source slug — the D14 takeover, so
+  # this multi-stage record REPLACES the length-1 ingest fold). After the auto
+  # `ingest` step, every partial run of one pull ARRIVES at the `gather`
+  # barrier (the edge below lowers to the explicit `join:gather` form) and the
+  # LAST arrival folds — so the operator hears about the pull ONCE, not once
+  # per file. With per-file fan-out on (`WILD_CONNECTOR_FANOUT_MAX > 0`) that
+  # is N file-runs gathered to one; on the sequential batch path it is the
+  # single batch run folding alone (arrived 1 of 1) — honest either way, the
+  # notice body renders the barrier's own completeness stamp.
+  - slug: invoices-inbound
+    name: Inbound Invoices (Batched)
+    description: >-
+      When the payables folder is pulled, gather the partial results and tell
+      the operator once how the pull went.
+    on: { source: invoices-inbound }
+    steps:
+      - { id: gather, does: gather }   # the identity fold (`collect`)
+      - id: announce
+        does: notify
+        using: notify-operator
+        config:
+          severity: info
+          title: "Payables intake processed"
+          body: "Pull complete — {{ arrived }} of {{ expected }} partial run(s) gathered."
+    flow:
+      - { from: ingest, to: gather }
+      - { from: gather, to: announce }
+
+  # NO process for `invoices-inbound-pdf`. It used to EXTEND that source with
+  # `extract → enrich → ingest-candidates`, which is why removing the source's
+  # `extractor:` block was only half the fix: the process carried its own
+  # extraction instruction and would have kept reading invoice headers off the
+  # scans into a source-mirror type that can never take them.
+  #
+  # The source is now a plain document door — it makes the scans findable. What
+  # the document knows and the CSV does not is its LINE ITEMS, and those are
+  # read by `invoice-positions-pdf` below.
+
+  # CONNECTOR (document) — the line-item feed EXTENDS its own source (same slug
+  # — the D14 takeover) with an ENRICH step between the extract and the governed
+  # candidate admit (ADR-0126 Phase 3). Per Beleg: read the lines, look the
+  # creditor up from the invoice they belong to (`lookup`, a governed read —
+  # zero LLM turns), then admit each candidate through the confirm gate.
+  #
+  # A missing invoice keeps what was extracted (`on_missing: keep`): the confirm
+  # gate is where a line for an unbooked invoice surfaces, not a silent drop.
+  - slug: invoice-positions-pdf
+    name: Inbound Invoice Line Items (PDF, Enriched)
+    description: >-
+      When an inbound-invoice PDF lands, read its line items, carry the
+      creditor over from the invoice, then admit them through the confirm gate.
+    on: { source: invoice-positions-pdf }
+    steps:
+      - id: extract
+        does: extract
+      - id: enrich
+        does: check
+        using: lookup
+        config:
+          from: invoice
+          key: invoice_id
+          select:
+            partner_id: partner_id
+          on_missing: keep
+      - id: ingest-candidates
+        does: file
+        using: ingest-candidates
+    flow:
+      - { from: ingest, to: extract }
+      - { from: extract, to: enrich }
+      - { from: enrich, to: ingest-candidates }
+
+  # NO line-item check ships yet — and the reason is worth more than the flow
+  # would have been, so it is written down instead of left as a gap.
+  #
+  # It must hang off a BUSINESS event ("this Beleg has been read"), never a
+  # storage event ("a row was written"). Four bindings were tried against a
+  # running daemon; each ARMED and each is silent about its own defect:
+  #
+  #   • `change: invoice` — nothing ever changes the invoice; confirming lines
+  #     writes `invoice_position`. Zero runs.
+  #   • `change: invoice_positions_total` — the gate ACCEPTS a projection as the
+  #     watched aggregate, but a reactive trigger fires on a record-write event
+  #     (`{type_slug, key, op, record, delta}`) and a folded projection emits
+  #     none. Zero runs.
+  #   • `change: invoice_position` — `change` compiles to a trigger watching
+  #     `update`, and a newly confirmed line is an `add`. The authoring word for
+  #     "a record appeared" is `new:`. Zero runs.
+  #   • a `pipeline:` hand-off from the document flow — fires CORRECTLY, one
+  #     child run per Beleg carrying the reader's run id as parent. But with
+  #     `cardinality: {rows: n}` the flow's item stays THE DOCUMENT (the
+  #     per-line fan-out lives inside the intake seam), so the item names no
+  #     invoice and the lookup has nothing to key on.
+  #
+  # `new: invoice_position` DOES run the whole chain — 16 runs, both governed
+  # lookups delivering, the verdict written on the invoice. It was still
+  # withdrawn, because the negative test failed: a Beleg tampered to print
+  # 235,60 where it owes 135,60 was extracted CORRECTLY (lines sum to 1108,40
+  # against a booked net of 1008,40) and still came out `reconciled`.
+  #
+  # Per line means N runs racing on ONE invoice, each reading a different
+  # partial state of the rollup, and whichever writes last decides the verdict.
+  # That is not noise — it is a check whose answer depends on a race, which is
+  # the one thing a check may never be. A green run proves only that something
+  # was written.
+  #
+  # The unit is the Beleg. What is missing to bind it there is one modelling
+  # statement — "every line of this document belongs to one invoice" — as a
+  # rows:1 header read beside the line read, or a provenance walk from the blob
+  # to the records derived from it (`record_provenance` is indexed on
+  # `blob_ref` for exactly that reverse walk).
+
+# ── Layer B — FLOWS (ADR-0185) ───────────────────────────────────────────────
+# The explicit operator-authored Flow lane. Where a `processes:` entry above
+# uses the `does/using/steps` sugar (a business rule that REACTS to a domain
+# event), a `flows:` entry is a `FlowDecl` written DIRECTLY — the very shape the
+# operator grows in Elder chat with `flow_declare` / `flow_edit`, or edits in the
+# dashboard Flow editor. Each compiles to a `pipeline` record with `origin:
+# model` and shares the slug namespace with `sources:` and `processes:`, so a
+# collision fails the cross-layer gate. `wild flows ls` lists them; the dashboard
+# renders each as a Flow node with a "▸ n steps" badge.
+#
+# These three exercise the ADR-0185 D3 presets end to end: Decide→Act, the
+# ADR-0184 `invoke-tool` envelope, and the full Capture→Extract→Confirm→File
+# chain with a human-in-the-loop confirm step.
+flows:
+  # A — DECIDE + ALERT (map → decision → notify-operator). A payable is handed
+  # in; compute the early-payment discount, decide DETERMINISTICALLY whether
+  # taking it is worthwhile, and alert the operator only when it is — otherwise
+  # stop quietly. Zero workers, zero LLM. The Decide→Act idiom (ADR-0185 D3).
+  # Distinct from `invoice-dual-check` (valid/invalid) and `invoice-screening`
+  # (urgency routing): this one is a money-opportunity call.
+  - slug: payable-cash-discount-review
+    name: Payable Cash-Discount Review
+    description: >-
+      When a payable is handed in, work out the early-payment discount and alert
+      the operator when taking it is worthwhile — otherwise stop quietly.
+    entry:
+      kind: manual
+      accepts: invoice
+    stages:
+      - id: assess
+        archetype: transform
+        mechanism: map
+        config:
+          set:
+            cash_discount_value: "amount * cash_discount_percent / 100"
+      - id: decide
+        archetype: transform
+        mechanism: decision
+        port: exclusive
+        config:
+          rules:
+            - { when: 'direction == "outbound"', resolution: not-a-payable }
+            - { when: 'cash_discount_percent > 0 && amount > 0', resolution: take-cash-discount }
+          default_resolution: pay-on-terms
+      - id: alert
+        archetype: sink-effect
+        mechanism: notify-operator
+        config:
+          severity: info
+          title: "cash discount opportunity on {{ invoice_id }}"
+          body: >-
+            Payable {{ invoice_id }} offers {{ cash_discount_percent }}% early-payment
+            discount (~{{ cash_discount_value }} EUR). Consider paying early.
+          actions:
+            - { id: schedule, label: "Schedule early payment", semantics: fix }
+            - { id: dismiss,  label: "Pay on normal terms",    semantics: ack }
+    edges:
+      - { from: assess, to: decide }
+      - { from: decide, to: alert, when: 'resolution == "take-cash-discount"' }
+      - { from: decide, to: "terminal:abort(no-cash_discount-action)", default: true }
+
+  # B — INVOKE-TOOL (ADR-0184 envelope). A manual payment-run trigger: build a
+  # SEPA credit-transfer file from the approved payment via an EXTERNAL tool,
+  # then tell the operator it is ready to sign. Shows `invoke-tool` — a
+  # deterministic Transform addressing a TOOL by name, `args` validated against
+  # the tool's OWN schema (opaque to the core; an unknown tool aborts audited at
+  # run time, never at compile). Nothing else in the example uses it.
+  - slug: sepa-payment-export
+    name: Build SEPA Payment File
+    description: >-
+      When the operator starts a payment run, build the SEPA credit-transfer file
+      from the approved payment and notify them it is ready to sign.
+    entry:
+      kind: manual
+      accepts: payment
+    stages:
+      - id: build-file
+        archetype: transform
+        mechanism: invoke-tool
+        note: "Stub: sepa_xml_export is an external tool not shipped in this example — this stage aborts audited at run time until a tool provider for it is installed."
+        config:
+          tool: sepa_xml_export
+          args:
+            format: pain.001.001.09
+            batch_booking: true
+      - id: notify
+        archetype: sink-effect
+        mechanism: notify-operator
+        config:
+          severity: warning
+          title: "SEPA file ready for payment {{ id }}"
+          body: >-
+            The SEPA credit-transfer file for payment {{ id }} is built and
+            waiting to be signed in your banking portal.
+    edges:
+      - { from: build-file, to: notify }
+
+  # C — CAPTURE → EXTRACT → CONFIRM → FILE (render-document · detect-boundaries ·
+  # join/collect · agentic extract · confirm · sink-data store). The
+  # human-in-the-loop split of one manually-handed scan holding several invoices:
+  # the operator confirms each extraction before it is filed. Distinct from the
+  # `invoices-inbound-pdf` CONNECTOR takeover — that pulls a folder and files
+  # straight through; this is a MANUAL flow with an explicit `confirm` gate.
+  - slug: multi-invoice-scan-split
+    name: Split Multi-Invoice Scan
+    description: >-
+      When the operator hands in one PDF holding several invoices, split it into
+      one document per invoice, extract each, confirm the extraction, then file
+      each as an invoice.
+    entry:
+      kind: manual
+    stages:
+      - id: render
+        archetype: transform
+        mechanism: render-document
+        config: { tiers: [full], max_pages: 100 }
+      - id: split
+        archetype: transform
+        mechanism: detect-document-boundaries
+        config:
+          mode: llm
+          instruction: "Start a new document at each invoice header (new invoice number or creditor)."
+      - id: gather
+        archetype: join
+        mechanism: collect
+        config: { into: pages }
+      - id: extract
+        archetype: transform
+        mechanism: extract-worker
+        execution: agentic
+        emits: invoice
+      - id: confirm
+        archetype: transform
+        mechanism: confirm
+      - id: file
+        archetype: sink-data
+        mechanism: store
+        config: { to: invoice, key: invoice_id, set: { amount: amount } }
+    edges:
+      - { from: render,  to: split }
+      - { from: split,   to: "join:gather" }
+      - { from: gather,  to: extract }
+      - { from: extract, to: confirm }
+      - { from: confirm, to: file }
+      - { from: file,    to: "terminal:return(filed)" }

@@ -1,0 +1,47 @@
+# Minimal GENESIS fixture ontology (ADR-0108 DDD authoring source) for the
+# selection-eval walk `a-genesis-interview-proposes-one-round`.
+#
+# NOTHING declared, and that is the fixture's whole point: this walk is about
+# a FRESHLY CREATED tribe, and a tribe the dashboard creates declares nothing
+# — `tribe_create`'s `seed_minimal_model` writes the bounded context and no
+# elements (`minimal_ddd_genesis_yaml`). Measured live 2026-09-03 on a real
+# create: `aggregates: []`.
+#
+# It carried one aggregate (`notiz`) until 2026-09-03, and not by choice: the
+# eval runner's readiness probe demanded a non-system type before a trial
+# could start, so the one scenario about a fresh tribe could not BE one. That
+# probe now asks what the fixture declares and proves the surface on a system
+# type when the answer is nothing (`readiness.rs`), which is what freed this
+# file to say the truth.
+#
+# The consequence the walk depends on: with nothing declared, `domain_unfounded`
+# is true, the turn reads `posture: intake`, `lane-ddd.md`'s intake fence
+# renders, and `Reading::founding_opener` arms the proposal-owed net — the
+# mechanism ADR-0315 put behind the frontier round this scenario asserts.
+# Every type the operator's intent names (Halter, Fahrzeuge, Buchungen,
+# Werkstatttermine, TÜV) stays absent, as it always did: a fixture carrying
+# any of them would pre-satisfy the premise.
+context: fleet
+
+# ADR-0236 — what this tribe is FOR, kept to the minimum that is still honest:
+# a purpose the interview can check proposals against, and non-goals that are
+# true of a tribe that has not been modelled yet.
+charter:
+  purpose: >
+    Wir bringen die Fuhrpark-Verwaltung gemeinsam ans Laufen: erst verstehen,
+    welche Objekte und Aufgaben der Alltag braucht, dann das Modell dazu
+    aufbauen — Schritt für Schritt, mit Freigabe vor jedem größeren Baustein.
+  non_goals:
+    # Deliberately scoped to the BIGGER blocks, matching the purpose: the
+    # kickoff licenses building the model DURING the interview (the shipped
+    # teaching commits the one or two central declarations as they clear), so
+    # a blanket "nothing without a go" would be a non-goal this tribe breaks
+    # by design — and a confound that steers the walk against the teaching it
+    # measures. What waits for the go is the frontier round.
+    - Größere Bausteine — Mengen an Beispieldaten, Apps, wiederkehrende
+      Aufgaben — bauen wir nicht ohne Freigabe des Operators. Die kommen als
+      nummerierte Liste auf den Tisch, gebaut wird erst nach dem Go.
+    - Wir kaufen, verkaufen und buchen nichts in der Welt — diese Domäne
+      verwaltet nur ihr eigenes Modell und ihre eigenen Daten.
+
+aggregates: []

@@ -1,0 +1,93 @@
+# DDD constitution for the ADR-0171 invoice-capture example — the
+# single-document Content Flow: capture → extract → confirm → file → notify.
+#
+# One aggregate, one DOCUMENT source for invoice PDFs, and a `processes:` flow
+# whose `does: review, using: confirm` step pauses every extracted candidate
+# for operator confirmation before the governed `file` sink admits it.
+#
+# Named gap (kept honest, not faked): conditional confirm-routing ("only pause
+# on low confidence or high amount") needs a `when:` edge over the extracted
+# candidate's fields, but between `extract` and `file` the walking item is the
+# candidate SUBMISSION envelope — `amount`/`confidence` sit nested under
+# `candidates[].value`, and `when:` guards read item top-level fields only.
+# Until the engine flattens per-candidate items (or guards learn a nested
+# path), the example confirms EVERY candidate.
+context: invoice_capture
+
+aggregates:
+  - name: supplier_invoice
+    display_name: Supplier Invoice
+    plural: Supplier Invoices
+    description: >-
+      An inbound supplier invoice extracted from a captured PDF and admitted
+      through operator confirmation. Kept as a mirror-like ledger: the source
+      documents are the canonical originals.
+    title_key: invoice_id
+    identity:
+      key: [invoice_id]
+    state:
+      - { name: invoice_id, type: text, required: true, description: The supplier's invoice number }
+      - { name: supplier, type: text, required: true, description: Supplier name }
+      - { name: amount, type: text, required: true, description: Invoice gross amount as extracted }
+      - { name: direction, type: text, required: true, description: inbound or outbound }
+
+sources:
+  # A folder feed for invoice PDFs. The interval trigger only ARMS the source —
+  # the e2e drives each pull deterministically via the `intake_sync` operator
+  # verb, so the window is deliberately wide (nothing fires mid-test).
+  - slug: invoice-capture
+    name: Invoice Capture
+    locator: inbox/invoice-capture
+    target_type: supplier_invoice
+    trigger:
+      - { kind: interval, seconds: 3600 }
+    filter:
+      include_ext: [pdf]
+    constants:
+      - { field: direction, value: inbound, ty: text }
+    extractor:
+      mechanism: llm-extractor
+      trust: deterministic
+      max_concurrent: 4
+      tuning:
+        # `auto` picks vision extraction for scanned images and the text path
+        # for born-digital PDFs (ADR-0123; ADR-0171 Phase 1.6/1.7).
+        render: auto
+        custom_instruction: >-
+          Extract the supplier invoice fields (invoice_id, supplier, amount)
+          from the document.
+
+processes:
+  # The source process EXTENDS its document source (same slug — the takeover).
+  # The compiled pipeline prepends an `ingest` Sink-Data stage before the
+  # authored steps; the first edge bridges `ingest` -> `extract`.
+  - slug: invoice-capture
+    name: Invoice Capture with Confirmation
+    description: >-
+      When an invoice PDF lands, extract the candidate record, pause for
+      operator confirmation, file the confirmed record, and tell the operator.
+    on:
+      source: invoice-capture
+    steps:
+      - id: extract
+        does: extract
+        config:
+          custom_instruction: Invoice capture branch instruction reached dispatch
+      - id: confirm
+        does: review
+        using: confirm
+      - id: file
+        does: file
+        using: ingest-candidates
+      - id: announce
+        does: notify
+        using: notify-operator
+        config:
+          severity: info
+          title: "Invoice filed"
+          body: "An extracted invoice passed operator confirmation and was filed."
+    flow:
+      - { from: ingest, to: extract }
+      - { from: extract, to: confirm }
+      - { from: confirm, to: file }
+      - { from: file, to: announce }

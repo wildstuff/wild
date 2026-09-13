@@ -1,0 +1,44 @@
+# NOT a member of any enclosing workspace: this template is meant to be
+# dropped somewhere and built. Without this, cargo folds it into whatever workspace
+# surrounds it and resolves against that lock instead of the `Cargo.lock`
+# packed beside these sources.
+[workspace]
+
+[package]
+license = "Apache-2.0"
+name = "slugify"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "=0.58.0", features = ["async-spawn"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# ADD business crates here (allowlisted only). Pin them in the SAME
+# shape the operator allowlists — most carry `default-features =
+# false`, because a default feature can pull an OPTIONAL transitive
+# dep (e.g. rust_decimal's default features reach `borsh`) that the
+# hermetic build's offline index has NOT cached, which fails lock
+# resolution before a single line compiles. e.g.
+# rust_decimal = { version = "1", default-features = false, features = ["serde", "serde-str"] }
+# chrono = { version = "0.4", default-features = false, features = ["alloc"] }
+
+[package.metadata.component]
+package = "wildstuff:slugify"
+
+[package.metadata.component.target]
+path = "wit"
+world = "slugify"
+
+[package.metadata.component.target.dependencies]
+         "wild:tool-provider" = { path = "wit/deps/wild-tool-provider/tool-provider.wit" }
+"wild:plugin-meta" = { path = "wit/deps/wild-plugin-meta/plugin-meta.wit" }
+
+[profile.release]
+codegen-units = 1
+opt-level = "s"
+lto = true
+strip = true

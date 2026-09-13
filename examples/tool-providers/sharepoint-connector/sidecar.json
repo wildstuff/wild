@@ -1,0 +1,100 @@
+{
+  "slug": "sharepoint-connector",
+  "version": "0.1.0",
+  "source": {
+    "type": "local",
+    "path": "sharepoint-connector-0.1.0.wasm"
+  },
+  "wasm_filename": "sharepoint-connector-0.1.0.wasm",
+  "trust": {
+    "tier": "community"
+  },
+  "provides": [
+    "wild:tool-provider/tools@0.4.0",
+    "wild:worker/handler@0.1.0",
+    "wild:worker/meta@0.1.0",
+    "wild:function/backing@0.1.0"
+  ],
+  "requires": [
+    "wild:secrets/store@0.1.0",
+    "wasi:http/outgoing-handler@0.2.0",
+    "wild:messaging/consumer@0.3.0"
+  ],
+  "config_keys": [
+    "tenant",
+    "site_url"
+  ],
+  "secret_aliases": [
+    "sharepoint-client-secret"
+  ],
+  "settings": [
+    {
+      "key": "tenant",
+      "type": "text",
+      "label": "Tenant",
+      "description": "Microsoft-365-Tenant (GUID oder Domain), der in das OAuth-Token-URL-Template `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token` eingesetzt wird. Pro Quelle verschieden — daher Instanz-Scope.",
+      "required": true,
+      "scope": "instance"
+    },
+    {
+      "key": "site_url",
+      "type": "url",
+      "schemes": ["https"],
+      "label": "Site-URL",
+      "description": "URL der SharePoint-Site (z. B. https://contoso.sharepoint.com/sites/Finance), die der Connector über Microsoft Graph liest. Pro Quelle verschieden — daher Instanz-Scope.",
+      "required": true,
+      "scope": "instance"
+    },
+    {
+      "key": "sharepoint-client-secret",
+      "type": "secret",
+      "label": "Client-Secret",
+      "description": "Client-Secret der Azure-AD-App-Registrierung für den client_credentials-Grant. Referenz auf einen Keychain-Eintrag (niemals inline); die OAuth-Injektion bleibt das `sharepoint`-auth_binding (D8).",
+      "required": true,
+      "scope": "instance"
+    }
+  ],
+  "auth_bindings": [
+    {
+      "name": "sharepoint",
+      "description": "Microsoft 365 / SharePoint OAuth access (host token injected as bearer). Hosts are omitted deliberately — they are tenant/site-specific and set by the operator at runtime (see config_keys tenant/site_url + system/oauth.yaml).",
+      "inject": "bearer",
+      "oauth": {
+        "grant": "client_credentials",
+        "token_url_template": "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+        "scopes": ["https://graph.microsoft.com/.default"],
+        "token_endpoint_auth": "client_secret_post",
+        "client_secret_ref_default": "sharepoint-client-secret"
+      }
+    }
+  ],
+  "capability_bundles": [
+    "source.connector",
+    "scheme.sharepoint",
+    "worker.change-feed",
+    "effect.sharepoint",
+    "function.sharepoint"
+  ],
+  "source_connector": {
+    "setup": "oauth",
+    "structure": "schema_declaring",
+    "binding": "fetched",
+    "scope": "none"
+  },
+  "wake_up": {
+    "type": "messaging-handler",
+    "subscription_template": "wild.{tribe}.worker.sharepoint-change.{role}.task"
+  },
+  "effects": {
+    "sharepoint-create-folder": {
+      "risk": "medium",
+      "rule_key": "sharepoint.create.folder",
+      "side_effect_class": "tool-invoke"
+    },
+    "sharepoint-update-list-item": {
+      "risk": "high",
+      "rule_key": "sharepoint.update.list_item",
+      "side_effect_class": "tool-invoke"
+    }
+  }
+}
