@@ -1,0 +1,7 @@
+# Intake mapping for the bank-accounts seed.
+# 1:1 with the `bank_account` type, so auto-intake — only
+# `{target_type, columns, key}` is shipped; the records lane derives the
+# identity map and (origin: authored) writes via Upsert.
+target_type: bank_account
+key: [iban]
+columns: [iban, account_name, bank, currency, opening_balance, opening_date, balance, balance_date]

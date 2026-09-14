@@ -1,0 +1,20 @@
+{
+  "slug": "hello-widget",
+  "version": "0.1.0",
+  "source": {
+    "type": "oci",
+    "ref": "oci://ghcr.io/wildstuff/plugins/widgets/hello-widget:0.1.0",
+    "digest": "sha256:unknown"
+  },
+  "wasm_filename": "hello-widget-0.1.0.wasm",
+  "trust": {
+    "tier": "community"
+  },
+  "provides": [
+    "wild:ui/widget@0.1.0"
+  ],
+  "capability_bundles": [],
+  "config_keys": [],
+  "secret_aliases": [],
+  "default_pool_size": 1
+}

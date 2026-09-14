@@ -1,0 +1,715 @@
+# ADR-0108 — the DDD authoring source (`DomainModelDoc`) for the
+# fitness-tracker tribe: a CALORIE-BALANCE coach. THE CONSTITUTION of this tribe.
+#
+# This is the single ontology source. `wild tribe apply` (with the manifest's
+# `authoring_method: ddd`) routes through `wild_ddd::compiler::compile`, which
+# lowers this one file — deterministically, no hand-translation — into the
+# value objects, functions, aggregates, projections, verbs and Layer-B source
+# bindings the runtime needs. There is no `seeds.yaml` / `shared-properties.yaml`
+# / `functions/` / `verbs/` / `sources/` — the model is the whole ontology.
+#
+# Two axes of tracking, the same as the domain has always modelled:
+#   - calories IN   — what the client eats (`food_log` over the `food` table)
+#   - calories OUT  — what they burn (`workout_log` over `exercise`)
+# and the NET balance between them (the `energy_balance` view).
+context: fitness
+
+# ADR-0236 — what this tribe is FOR, and what it deliberately is not. Authored,
+# never derived: a purpose read off the aggregates below could only ever agree
+# with them. Every non-goal is checked against what this model actually
+# declares — one the tribe already breaks is worse than none, because it reads
+# like a rule and the first change measured against it gets an answer nobody
+# can act on.
+charter:
+  purpose: >
+    Wir behalten die Energiebilanz im Blick: was reinkommt, was verbraucht wird,
+    und wie beides zum selbstgesteckten Tagesziel steht — damit man sieht, wie
+    eine Woche wirklich gelaufen ist, statt sie zu schätzen.
+  non_goals:
+    - Wir geben keine medizinischen oder Ernährungsempfehlungen und stellen
+      keine Diagnosen. Wir zählen, wir raten nicht.
+    - Wir setzen das Tagesziel nicht selbst und passen es nicht automatisch an.
+      Das Ziel kommt vom Menschen, wir messen nur dagegen.
+    - Wir geben Profil- und Gesundheitsdaten an niemanden weiter und
+      vergleichen niemanden mit anderen.
+    - Wir kaufen und bestellen nichts. Gefundene Rezepte sind Vorschläge zum
+      Nachkochen, keine Einkaufsliste, die jemand auslöst.
+
+# ── The energy lexicon (ADR-0108 §2 value object) ────────────────────────
+# Every kcal field binds this with a directional `role` (content / consumes /
+# burns) so the chief reasons about energy DIRECTION (in vs out), not just
+# numbers — the same pattern liquidity uses for `money_amount` (holds/owes/pays).
+value_objects:
+  - name: kcal
+    base: decimal
+    unit: kcal
+    description: An energy amount in kilocalories (kcal)
+    openness: closed
+    rationale: kcal is the fixed energy unit for the whole tribe — a new unit is a code change.
+
+  - name: web_url
+    base: text
+    constraint: url
+    description: An http(s) web address — structurally checked on every write, so a
+      value that url-fetch could never fetch is refused at the door instead of
+      becoming a work item that always fails.
+    openness: closed
+    rationale: The shape of a web address is fixed by the standard, not by this tribe.
+    # NOT sensitive — a provenance link is not PII, and two of the conforming
+    # fields are identity keys, which are un-maskable by construction.
+
+# ── The closed domain sets (ADR-0108 §2) ────────────────────────────────
+# Each is a controlled taxonomy: a new value is a modelling decision, not a
+# third-party extension — so every one is `closed`.
+value_sets:
+  - name: food_category
+    values: [protein, carb, fat, vegetable, fruit, dairy, drink, snack, composite]
+    openness: closed
+    rationale: A fixed food-group taxonomy for grouping + guidance; a new group is a modelling change.
+  - name: exercise_category
+    values: [cardio, strength, flexibility, sport, daily]
+    openness: closed
+    rationale: The activity taxonomy is a controlled set; a new category is a modelling change.
+  - name: meal
+    values: [breakfast, lunch, dinner, snack]
+    openness: closed
+    rationale: The four meal slots of a day are fixed.
+  - name: intensity
+    values: [easy, moderate, hard]
+    openness: closed
+    rationale: A three-band effort scale, deliberately coarse.
+  - name: goal_type
+    values: [deficit, maintenance, surplus]
+    openness: closed
+    rationale: The three energy-goal directions are the complete set (lose / hold / gain).
+  - name: gender
+    values: [female, male, other]
+    openness: closed
+    rationale: The matching axis for age/gender-aware exercise + recipe suitability; a new value is a modelling change.
+  - name: gender_suitability
+    values: [any, female, male]
+    openness: closed
+    rationale: Who an exercise/recipe suits — `any` plus the two specific bands; closed three-value set.
+  - name: exercise_level
+    values: [beginner, intermediate, advanced]
+    openness: closed
+    rationale: A coarse difficulty band for matching exercises to the client; closed.
+  - name: candidate_feeder
+    values: [brave_direct, from_web_source]
+    openness: closed
+    rationale: The two producers that seed the recipe_candidate queue — provenance of a queued URL; closed.
+  - name: queue_status
+    values: [pending, done, failed]
+    openness: closed
+    rationale: ADR-0114 work-set vocabulary for an entity-backed queue; the closed set the drain reads.
+
+# ── The Atwater function (ADR-0108 named pure function) ──────────────────
+# Energy from macronutrients: protein 4 kcal/g, carbohydrate 4 kcal/g,
+# fat 9 kcal/g. Referenced by `food.kcal_from_macros` (@ref); cross-checks the
+# stated `kcal_per_100g` so a typo in a web-looked-up food surfaces as a gap.
+functions:
+  - name: kcal_from_macros
+    expr: "(protein_g * 4) + (carbs_g * 4) + (fat_g * 9)"
+    description: Atwater estimate — kcal per 100 g from protein/carb (×4) + fat (×9) grams.
+
+# ── The structural interface (ADR-0108 §3.3) ─────────────────────────────
+# A shape-only type with no records of its own. `exercise` and `recipe`
+# implement it BY SHAPE — no `implements` at either end — and they already did
+# before it was written down: both declare these five fields identically, same
+# names, same types, same value set, same value object.
+#
+# That is the whole justification for declaring it. An interface is worth
+# naming when a regularity ALREADY holds and something operates over it
+# generically; here `profile` is that consumer, and says so itself — "the
+# anchor for age/gender-aware exercise + recipe matching". The chief filters
+# both kinds against one profile, so the pair really is one shape with two
+# instances.
+#
+# It is deliberately NOT stretched to cover `food`: food has no
+# age/gender suitability, and widening the interface to the two fields all
+# three happen to share (`name`, `source_url`) would name a coincidence rather
+# than a rule.
+interfaces:
+  - name: suitable_reference
+    context: reference
+    fields:
+      - { name: name, type: text, required: true, description: What the entry is called }
+      - { name: source_url, type: text, vo: web_url, description: Where this entry was learned from }
+      - { name: gender_suitability, type: enum, value_set: gender_suitability, description: Who this entry suits }
+      - { name: min_age, type: int, description: Lower bound of the age band it suits }
+      - { name: max_age, type: int, description: Upper bound of the age band it suits }
+
+aggregates:
+  # ── REFERENCE: the food table ──────────────────────────────────────────
+  # Authored + seeded (the `data:` starter feed); the chief extends it via
+  # `record_food` from a web lookup. Explicit business key (`food_id`), so a
+  # create must carry it — no minted identity.
+  - name: food
+    context: reference
+    display_name: Food
+    plural: Foods
+    description: >-
+      A food item and its energy + macronutrient content per 100 g — the lookup
+      table calorie INTAKE is computed against. Extend it with your own foods,
+      or let the chief add one via web-search when you log something new.
+    title_key: name
+    icon: "🍎"
+    color: "#3fb950"
+    category: Reference
+    template_role: scaffold
+    adapt_hint: Replace with the foods you eat, or let the chief web-search them.
+    customer_visible: true
+    identity:
+      key: [food_id]
+    state:
+      - { name: food_id, type: text, required: true }
+      - { name: name, type: text, required: true }
+      - { name: kcal_per_100g, type: decimal, required: true, vo: kcal, role: content, description: Energy content per 100 g }
+      - { name: protein_g, type: decimal, description: Protein grams per 100 g }
+      - { name: carbs_g, type: decimal, description: Carbohydrate grams per 100 g }
+      - { name: fat_g, type: decimal, description: Fat grams per 100 g }
+      - { name: category, type: enum, value_set: food_category, description: "Rough food group, for grouping + guidance" }
+      - { name: source_url, type: text, vo: web_url, description: Where the chief found this food's data (web-search provenance) }
+    # Atwater cross-check computed in the fold from the macros — should ≈
+    # kcal_per_100g; a large gap flags a bad data entry.
+    derived:
+      - { name: kcal_from_macros, type: decimal, expr: "@kcal_from_macros", vo: kcal, role: content, description: Atwater estimate from macros; sanity-checks kcal_per_100g. }
+    commands:
+      - name: record_food
+        description: >-
+          Add (or update) a food in the reference table from a web lookup. Pass
+          the per-100 g energy + macros and the source URL.
+        risk: low
+        inputs:
+          - food_id
+          - name
+          - { name: kcal_per_100g }
+          - { name: protein_g, required: false }
+          - { name: carbs_g, required: false }
+          - { name: fat_g, required: false }
+          - { name: category, required: false }
+          - { name: source_url, required: false }
+        requires:
+          kcal_per_100g: "> 0"
+
+  # ── REFERENCE: the exercise table ──────────────────────────────────────
+  - name: exercise
+    context: reference
+    display_name: Exercise
+    plural: Exercises
+    description: >-
+      A physical activity and its energy-burn RATE (kcal per minute, for a
+      ~70 kg adult) — the lookup table calorie OUT is computed against.
+      Carries optional suitability (age band, gender, level) so the chief can
+      match an exercise to the client's `profile`.
+    title_key: name
+    icon: "🏃"
+    color: "#1f6feb"
+    category: Reference
+    template_role: scaffold
+    adapt_hint: Replace with your activities, or let the chief web-search burn rates.
+    customer_visible: true
+    identity:
+      key: [exercise_id]
+    state:
+      - { name: exercise_id, type: text, required: true }
+      - { name: name, type: text, required: true }
+      - { name: kcal_per_min, type: decimal, required: true, vo: kcal, role: content, description: Energy burned per minute (~70 kg reference body) }
+      - { name: met, type: decimal, description: "Metabolic equivalent (intensity factor), optional" }
+      - { name: category, type: enum, value_set: exercise_category }
+      - { name: min_age, type: int, description: Lowest client age (years) this suits — optional matching hint }
+      - { name: max_age, type: int, description: Highest client age (years) this suits — optional matching hint }
+      - { name: gender_suitability, type: enum, value_set: gender_suitability, description: Who this suits (any/female/male) — optional matching hint }
+      - { name: level, type: enum, value_set: exercise_level, description: Difficulty band — optional matching hint }
+      - { name: source_url, type: text, vo: web_url, description: Web-search provenance for the burn rate }
+    commands:
+      - name: record_exercise
+        description: >-
+          Add (or update) an exercise in the reference table from a web lookup.
+          Pass the per-minute burn rate (~70 kg adult), the source URL, and
+          optional suitability (age band / gender / level) for profile matching.
+        risk: low
+        inputs:
+          - exercise_id
+          - name
+          - { name: kcal_per_min }
+          - { name: met, required: false }
+          - { name: category, required: false }
+          - { name: min_age, required: false }
+          - { name: max_age, required: false }
+          - { name: gender_suitability, required: false }
+          - { name: level, required: false }
+          - { name: source_url, required: false }
+        requires:
+          kcal_per_min: "> 0"
+
+  # ── REFERENCE: the recipe table ────────────────────────────────────────
+  # A COMPOSITE of foods with preparation + per-serving energy/macros — distinct
+  # from `food` (a single ingredient, per 100 g). Seeded from `data/recipes.csv`
+  # and grown by the chief from the recipe intake frontier (see `recipe_candidate`
+  # + the `recipe-crawl` source). Carries the same suitability axis as `exercise`
+  # so the chief matches recipes to the client's `profile` + goal.
+  - name: recipe
+    context: reference
+    display_name: Recipe
+    plural: Recipes
+    description: >-
+      A recipe — ingredients + preparation with per-serving energy and macros,
+      plus the goal/meal/suitability tags that let the chief recommend it for a
+      given client (age, gender, goal). `recorded_on` anchors `age_days`.
+    title_key: name
+    icon: "🍲"
+    color: "#d2a8ff"
+    category: Reference
+    template_role: scaffold
+    adapt_hint: Replace with your recipes, or let the chief grow them from the recipe intake frontier.
+    customer_visible: true
+    identity:
+      key: [recipe_id]
+    state:
+      - { name: recipe_id, type: text, required: true }
+      - { name: name, type: text, required: true }
+      - { name: ingredients, type: text, description: "Ingredient list (free text, minimal)" }
+      - { name: instructions, type: text, description: Preparation steps }
+      - { name: servings, type: decimal, description: How many servings the recipe yields }
+      - { name: kcal_per_serving, type: decimal, required: true, vo: kcal, role: content, description: Energy per serving }
+      - { name: protein_g, type: decimal, description: Protein grams per serving }
+      - { name: carbs_g, type: decimal, description: Carbohydrate grams per serving }
+      - { name: fat_g, type: decimal, description: Fat grams per serving }
+      - { name: meal, type: enum, value_set: meal, description: Which meal slot it fits }
+      - { name: goal_type, type: enum, value_set: goal_type, description: Which energy goal it supports }
+      - { name: min_age, type: int, description: Lowest client age this suits — optional }
+      - { name: max_age, type: int, description: Highest client age this suits — optional }
+      - { name: gender_suitability, type: enum, value_set: gender_suitability, description: Who this suits (any/female/male) — optional }
+      - { name: source_url, type: text, vo: web_url, description: Where the chief found this recipe (intake provenance) }
+      - { name: recorded_on, type: date, description: The day this recipe was added to the reference table — anchors age_days }
+    derived:
+      - { name: age_days, type: integer, expr: "as_of() - recorded_on", description: "Days since this recipe was added, as of the query date. Read-time; never stored." }
+    commands:
+      - name: record_recipe
+        description: >-
+          Add (or update) a recipe in the reference table — from a curated intake
+          hit or a direct lookup. Pass per-serving energy/macros, tags, and the
+          source URL; set `recorded_on` to today so `age_days` tracks freshness.
+        risk: low
+        inputs:
+          - recipe_id
+          - name
+          - { name: ingredients, required: false }
+          - { name: instructions, required: false }
+          - { name: servings, required: false }
+          - { name: kcal_per_serving }
+          - { name: protein_g, required: false }
+          - { name: carbs_g, required: false }
+          - { name: fat_g, required: false }
+          - { name: meal, required: false }
+          - { name: goal_type, required: false }
+          - { name: min_age, required: false }
+          - { name: max_age, required: false }
+          - { name: gender_suitability, required: false }
+          - { name: source_url, required: false }
+          - { name: recorded_on, required: false }
+        requires:
+          kcal_per_serving: "> 0"
+
+  # ── STAGING: raw web-search hits (ADR-0086 Chief-free intake) ──────────
+  # A source_mirror fed by the `fitness-web-search` binding below: the scheduled
+  # crawl stages one record per hit here, and the chief later promotes the useful
+  # ones into the reference tables via `record_food` / `record_exercise`.
+  - name: web_source
+    context: staging
+    display_name: Web source hit
+    plural: Web source hits
+    description: >-
+      A raw web-search result staged by the scheduled `fitness-web-search`
+      intake source. The field set matches what `search-enumerate` emits per
+      item (`{url, title, snippet, rank}`) plus the runner's attached page blob.
+      New hits also feed the `recipe-from-web-source` process (Feeder B into the
+      recipe queue) — enabled by the ADR-0112 step-1 data-event closure.
+    title_key: title
+    icon: "🔎"
+    color: "#8957e5"
+    category: Staging
+    customer_visible: false
+    identity:
+      key: [url]
+    mirror:
+      - { name: url, type: text, required: true, vo: web_url, description: "The result URL — the dedup key, also what url-fetch fetched" }
+      - { name: title, type: text, description: The result title }
+      - { name: snippet, type: text, description: The search snippet (the curation cue the chief reads) }
+      - { name: rank, type: int, description: Result rank within the search (0-based) }
+      - { name: page_blob, type: text, description: Blob ref to the fetched page body the runner attached }
+    # Wall-clock crawl stamp — boundary state written at crawl time by a host
+    # enricher calling the `clock` tool (`now` verb → RFC3339). Held as raw
+    # RFC3339 text (not `date`) to sidestep string→date coercion. Kept as
+    # `state` (host/tool-written) rather than `mirror` (search-enumerate shape)
+    # or `enriched` (the DDD `enriched_by` lane targets expr/llm-prompt functions
+    # and maps a single output by field-name — it does not cleanly express a
+    # generic tool's `{rfc3339, epoch_millis}` → `crawled_at` mapping here). The
+    # reliable "how old is this item" path stays `recipe.recorded_on`/`age_days`;
+    # the clock→crawled_at enricher wiring is a runtime concern, NOT verified in
+    # this example.
+    state:
+      - { name: crawled_at, type: text, description: RFC3339 wall-clock stamp of when this hit was crawled (host/tool-written via clock/now; enricher wiring not verified here) }
+
+  # ── STAGING: the recipe URL frontier (ADR-0114 queue-fed intake) ───────
+  # An entity-backed work queue: `url` is the record KEY (re-seeding a known URL
+  # is an idempotent upsert), `status` is the closed work-set the drain reads.
+  # Fed by TWO independent producers that both write ordinary governed `pending`
+  # rows: Feeder A (the `recipe-discovery` worker, brave-direct) and Feeder B (the
+  # `recipe-from-web-source` process, from `web_source`). Drained by the single
+  # `recipe-crawl` source (queue-enumerate + url-fetch); the host flips completed
+  # rows pending → done at the intake-result seam.
+  - name: recipe_candidate
+    context: staging
+    display_name: Recipe candidate
+    plural: Recipe candidates
+    description: >-
+      A URL queued for recipe extraction — the fetch frontier. `url` is the key
+      (fan-in from both feeders dedups for free); `status` pending|done|failed is
+      what the `recipe-crawl` drain reads and flips. `discovered_on` records when
+      the URL was queued, so candidate freshness is queryable.
+    title_key: title
+    icon: "🥘"
+    color: "#d2a8ff"
+    category: Staging
+    customer_visible: false
+    identity:
+      key: [url]
+    state:
+      - { name: url, type: text, required: true, vo: web_url, description: "The candidate URL — the queue key, also what url-fetch pulls" }
+      - { name: status, type: enum, value_set: queue_status, required: true, description: Work-set state the drain reads/flips }
+      - { name: title, type: text, description: Page/result title at enqueue time }
+      - { name: snippet, type: text, description: Search snippet that justified enqueuing }
+      - { name: rank, type: int, description: Search rank when seeded from a search hit }
+      - { name: feeder, type: enum, value_set: candidate_feeder, description: Which producer queued this URL }
+      - { name: discovered_on, type: date, description: The day this URL was queued (written by the feeder) }
+
+  # ── TRACKING: calories IN ──────────────────────────────────────────────
+  - name: food_log
+    context: tracking
+    display_name: Food Log Entry
+    plural: Food Log
+    description: >-
+      One eaten food on a date — the calorie INTAKE feed. `kcal` is the energy
+      of THIS portion (food.kcal_per_100g × grams ÷ 100), filled by `log_food`.
+    title_key: log_id
+    valid_time_field: date
+    icon: "🍽️"
+    color: "#3fb950"
+    category: Tracking
+    customer_visible: true
+    identity:
+      key: [log_id]
+    state:
+      - { name: log_id, type: text, required: true }
+      - { name: date, type: date, required: true, description: The day this was eaten — the tracking clock }
+      - { name: food_id, type: text, required: true, description: Which food (joins the food reference table) }
+      - { name: meal, type: enum, value_set: meal }
+      - { name: grams, type: decimal, required: true, description: Portion size in grams }
+      - { name: kcal, type: decimal, required: true, vo: kcal, role: consumes, description: Calories of THIS entry — summed into calories IN }
+      - { name: notes, type: text }
+    # Read-time (aging): computes on READ at the query's date, never stored.
+    derived:
+      - { name: days_ago, type: integer, expr: "as_of() - date", description: "Days since this entry, as of the query date. Read-time; never stored." }
+    relations:
+      # A food-log entry MUST reference a real food (ENFORCED): the chief adds it
+      # via record_food first, then logs it.
+      - name: eats
+        target: food
+        via_field: food_id
+        inverse_name: logged_as
+        enforced: true
+        description: The food this entry records
+    commands:
+      - name: log_food
+        description: >-
+          Log a food the client ate. Provide the computed `kcal` for the portion
+          (food.kcal_per_100g × grams ÷ 100). The food must already exist in the
+          reference table — use `record_food` first if it doesn't.
+        risk: low
+        inputs:
+          - log_id
+          - date
+          - food_id
+          - { name: meal, required: false }
+          - grams
+          - kcal
+          - { name: notes, required: false }
+        requires:
+          kcal: "> 0"
+          grams: "> 0"
+
+  # ── TRACKING: calories OUT ─────────────────────────────────────────────
+  - name: workout_log
+    context: tracking
+    display_name: Workout Log Entry
+    plural: Workout Log
+    description: >-
+      One workout on a date — the calorie BURN feed. `kcal_burned` is the energy
+      spent (exercise.kcal_per_min × duration_min), filled by `log_workout`.
+    title_key: log_id
+    valid_time_field: date
+    icon: "💪"
+    color: "#1f6feb"
+    category: Tracking
+    customer_visible: true
+    identity:
+      key: [log_id]
+    state:
+      - { name: log_id, type: text, required: true }
+      - { name: date, type: date, required: true }
+      - { name: exercise_id, type: text, required: true, description: Which activity (joins the exercise reference table) }
+      - { name: duration_min, type: decimal, required: true, description: "How long, in minutes" }
+      - { name: kcal_burned, type: decimal, required: true, vo: kcal, role: burns, description: Calories burned by THIS workout — summed into calories OUT }
+      - { name: intensity, type: enum, value_set: intensity }
+      - { name: notes, type: text }
+    relations:
+      - name: performs
+        target: exercise
+        via_field: exercise_id
+        inverse_name: logged_as
+        enforced: true
+        description: The activity this entry records
+    commands:
+      - name: log_workout
+        description: >-
+          Log a workout the client did. Provide the computed `kcal_burned`
+          (exercise.kcal_per_min × duration_min). The exercise must exist in the
+          reference table — use `record_exercise` first if it doesn't.
+        risk: low
+        inputs:
+          - log_id
+          - date
+          - exercise_id
+          - duration_min
+          - kcal_burned
+          - { name: intensity, required: false }
+          - { name: notes, required: false }
+        requires:
+          kcal_burned: "> 0"
+          duration_min: "> 0"
+
+  # ── TRACKING: the calorie goal ─────────────────────────────────────────
+  - name: goal
+    context: tracking
+    display_name: Calorie Goal
+    plural: Calorie Goals
+    description: The client's daily energy target — the line the net balance is judged against.
+    title_key: goal_id
+    icon: "🎯"
+    category: Tracking
+    customer_visible: true
+    identity:
+      key: [goal_id]
+    state:
+      - { name: goal_id, type: text, required: true }
+      - { name: daily_kcal_target, type: decimal, required: true, vo: kcal, role: content, description: Target net intake per day }
+      - { name: goal_type, type: enum, value_set: goal_type, required: true, description: "deficit = lose weight, maintenance = hold, surplus = gain" }
+      - { name: set_date, type: date }
+    commands:
+      - name: set_calorie_goal
+        description: Set the daily calorie target the net energy balance is measured against.
+        risk: low
+        inputs:
+          - goal_id
+          - daily_kcal_target
+          - goal_type
+          - { name: set_date, required: false }
+        requires:
+          daily_kcal_target: "> 0"
+
+  # ── TRACKING: the client profile ───────────────────────────────────────
+  # One per tribe instance (`--as alice-fitness` names the client). Carries the
+  # age/gender the chief matches `exercise`/`recipe` suitability against, plus
+  # the body measures the BMR estimate in `specs/domain.md` (Mifflin–St Jeor)
+  # already needs. `birth_year` is the stable anchor; the chief derives age.
+  - name: profile
+    context: tracking
+    display_name: Client Profile
+    plural: Client Profiles
+    description: >-
+      The client's stable attributes — birth year, gender, and the body measures
+      the BMR estimate needs. The anchor for age/gender-aware exercise + recipe
+      matching: the chief reads this to set profile-aware search queries and to
+      filter reference suitability.
+    title_key: profile_id
+    icon: "🧍"
+    color: "#f778ba"
+    category: Tracking
+    customer_visible: true
+    identity:
+      key: [profile_id]
+    state:
+      - { name: profile_id, type: text, required: true }
+      - { name: birth_year, type: int, description: Birth year — the stable anchor the chief derives age from }
+      - { name: gender, type: enum, value_set: gender, description: For age/gender-aware exercise + recipe matching }
+      - { name: weight_kg, type: decimal, description: Body weight in kg — feeds the BMR estimate }
+      - { name: height_cm, type: decimal, description: Height in cm — feeds the BMR estimate }
+    commands:
+      - name: set_profile
+        description: >-
+          Capture or update the client's profile (birth year, gender, body
+          measures). Drives profile-aware exercise/recipe matching and BMR.
+        risk: low
+        inputs:
+          - profile_id
+          - { name: birth_year, required: false }
+          - { name: gender, required: false }
+          - { name: weight_kg, required: false }
+          - { name: height_cm, required: false }
+
+# ── The read-models (CQRS read side) ─────────────────────────────────────
+projections:
+  # Calories IN per day — summed from that day's food log.
+  - name: daily_intake
+    context: summary
+    display_name: Daily Intake
+    plural: Daily Intake
+    description: Calories IN per day — summed from that day's food log.
+    icon: "🍽️"
+    category: Summary
+    # ADR-0083 — the client sees their own day. The three read-models below are
+    # `customer_visible` for the same reason the `food_log` they fold is: in
+    # THIS tribe the customer IS the person whose data it is, and the published
+    # app (`apps/energy-balance.yaml`) puts them on the client's own page. The
+    # gate is not decorative — `app_publish` refuses a read view bound to a type
+    # end users cannot see, because it would render empty for every one of them.
+    # (Contrast `liquidity-management`, where the customer is a business partner
+    # and the debtor roll-up must stay off their surface.)
+    customer_visible: true
+    key: [date]
+    fields:
+      - { name: date, type: date }
+      - { name: total_kcal_in, type: decimal, vo: kcal, role: consumes, description: Sum of food_log.kcal for the day }
+      - { name: entries, type: integer, description: How many things were logged that day }
+    grouped:
+      source: food_log
+      group_by: date
+      measures:
+        - { name: total_kcal_in, op: sum, field: kcal }
+        - { name: entries, op: count }
+
+  # Calories OUT per day — summed from that day's workouts.
+  - name: daily_burn
+    context: summary
+    display_name: Daily Burn
+    plural: Daily Burn
+    description: Calories OUT per day — summed from that day's workouts.
+    icon: "💪"
+    category: Summary
+    customer_visible: true
+    key: [date]
+    fields:
+      - { name: date, type: date }
+      - { name: total_kcal_out, type: decimal, vo: kcal, role: burns, description: Sum of workout_log.kcal_burned for the day }
+      - { name: active_minutes, type: decimal, description: Sum of workout_log.duration_min for the day }
+      - { name: workouts, type: integer }
+    grouped:
+      source: workout_log
+      group_by: date
+      measures:
+        - { name: total_kcal_out, op: sum, field: kcal_burned }
+        - { name: active_minutes, op: sum, field: duration_min }
+        - { name: workouts, op: count }
+
+  # How often each food is logged — the client's eating patterns.
+  - name: food_frequency
+    context: summary
+    display_name: Food Frequency
+    plural: Food Frequencies
+    description: How often each food is logged — the client's eating patterns.
+    icon: "🍎"
+    category: Summary
+    customer_visible: true
+    key: [food_id]
+    fields:
+      - { name: food_id, type: text }
+      - { name: times_logged, type: integer }
+      - { name: total_kcal, type: decimal, vo: kcal, role: consumes }
+    grouped:
+      source: food_log
+      group_by: food_id
+      measures:
+        - { name: times_logged, op: count }
+        - { name: total_kcal, op: sum, field: kcal }
+
+  # The headline number: net energy (calories in − calories out) over a rolling
+  # 7-day window — the single figure that says deficit or surplus.
+  #
+  # NOT bound by `apps/energy-balance.yaml`, and not for want of trying: a
+  # `kpi-tile` binds a projection FIELD, and a `view:` projection declares its
+  # outputs under `view.measures` with no `fields:` block, so the compiled type
+  # carries none for a view to name. The app therefore shows the two sides
+  # (`daily_intake` / `daily_burn`) beside each other and leaves the subtraction
+  # to the coach, which is honest rather than a tile that renders blank.
+  # `liquidity-management`'s `cash_flow_13w` has the same shape and is likewise
+  # unbound. Declaring `fields:` here would make it bindable — a modelling
+  # decision, deliberately not taken in passing.
+  - name: energy_balance
+    context: summary
+    display_name: 7-Day Energy Balance
+    plural: 7-Day Energy Balances
+    description: >-
+      Net energy (calories in − calories out) over a rolling 7-day window — the
+      single number that says whether the client is in a deficit or surplus.
+    view:
+      sources: [food_log, workout_log]
+      dimension_field: date
+      dimension_kind: date
+      window_days: 7
+      measures:
+        - { name: calories_in, expr: "sum_exact(food_log.kcal)" }
+        - { name: calories_out, expr: "sum_exact(workout_log.kcal_burned)" }
+        - { name: net_balance, expr: "calories_in - calories_out" }
+
+# ── The ACL / Source-Binding layer (ADR-0086 Chief-free intake) ──────────
+# The scheduled web-search crawl: `search-enumerate` turns the fixed query into
+# result items, `url-fetch` pulls each page, one hit per result is staged into
+# `web_source`, and the fetched page bodies are indexed into the `documents`
+# corpus so the operator can full-text search them (ADR-0089). Edit `locator`
+# to retarget the crawl — the chief rewrites it from the client's `profile` at
+# onboarding (age/gender-aware) so discovery matches the client.
+sources:
+  - slug: fitness-web-search
+    locator: "healthy high-protein meals and home workout routines 2026"
+    target_type: web_source
+    connector:
+      enumerate: search-enumerate
+      fetch: url-fetch
+    trigger:
+      - { kind: interval, seconds: 1800 }
+    index_corpora: [documents]
+
+  # The recipe URL frontier drain (ADR-0114 queue-fed intake). ONE drain shared
+  # by BOTH feeders of `recipe_candidate` (brave-direct + from-web_source):
+  # `queue-enumerate` reads `pending` rows (`ref = url`, bounded by `limit`),
+  # `url-fetch` pulls each page (HTML → document door → recipe extraction →
+  # `record_recipe`), and the host flips each completed row pending → done at the
+  # intake-result seam. Fired by every committed queue write plus a 15-min sweep.
+  # The document-door recipe extraction is the curation step (needs live verify).
+  - slug: recipe-crawl
+    locator: "queue://recipe_candidate?ref=url&limit=20"
+    target_type: recipe_candidate
+    connector:
+      enumerate: queue-enumerate
+      fetch: url-fetch
+    trigger:
+      - { kind: on-event, subject: "wild.{tribe}.data.recipe_candidate.*" }
+      - { kind: interval, seconds: 900 }
+
+# ── The reactive processes (ADR-0118 D14 — constitutional "when X → do Y") ──
+# Feeder B into the recipe queue: when the open search stages a NEW `web_source`
+# hit, the `recipe-frontier` worker decides whether it is recipe-relevant and, if
+# so, writes it as a `pending recipe_candidate` row (`url`-keyed → idempotent
+# fan-in with Feeder A). A single-step `new` reaction with one `review` step.
+processes:
+  - slug: recipe-from-web-source
+    name: Web-Treffer zu Rezept-Kandidat
+    description: >-
+      When the open search stages a new web_source hit, the recipe-frontier
+      worker filters it for recipe relevance and enqueues the worthy ones as
+      pending recipe_candidate rows — Feeder B into the shared recipe-crawl drain.
+    on: { new: web_source }
+    steps:
+      - { id: pick, does: review, using: recipe-frontier }

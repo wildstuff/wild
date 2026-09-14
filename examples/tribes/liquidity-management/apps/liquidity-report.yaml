@@ -1,0 +1,357 @@
+# The REPORT — the second published app of this tribe (ADR-0154), and the one
+# written for the accountant rather than for the schema.
+#
+# `liquidity-cockpit.yaml` beside this file is the working surface AND the
+# view-kind showcase: it exercises the schema broadly, which makes it a poor
+# thing to hand someone who wants to know how the business is doing. This app
+# answers exactly three questions, in the order a Buchhalter asks them:
+#
+#   1. How much cash do we actually have?          → `cash_position`
+#   2. How many invoices are there, and how much   → `invoice_book`
+#      of it is still open or already overdue?
+#   3. What is coming in and going out, week by    → `cash_forecast`
+#      week, for the next 13 weeks?
+#
+# Then it shows the two lists those numbers fold from — the accounts and the
+# bank movements — so no figure on the page is one an operator has to take on
+# trust. That is the whole app; there is no fourth page.
+#
+# EVERY headline figure here is a projection MEASURE. A `kpi-tile` and a
+# `chart` bind a projection, never an entity, and the tile's read is a SUM of
+# the measure across the projection's rows — so the four read-models this page
+# needs (`cash_position`, `invoice_book`, `cash_movement`, `cash_forecast`)
+# are declared in `../ontology/model.yaml`, not computed here. A view composes;
+# it never calculates.
+#
+# Validate with: wild app validate apps/liquidity-report.yaml
+
+id: liquidity-report
+name: Liquidity Report
+
+# No `default_tribe:` — see the cockpit beside this file. Absent, every view
+# binds the tribe the app is published under, so the bundle deploys under any
+# id (`wild tribe apply … --as acme-liquidity`) without the app going dark.
+
+branding:
+  logo: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='10' fill='%230f766e'/><path d='M7 13l3 3 7-8' stroke='white' stroke-width='2' fill='none'/></svg>"
+  accent: teal
+  color_scheme: system
+  # A READING surface: `normal` is the deliberate middle of the three presets
+  # (the cockpit beside this file is `compact`, the fitness client app is
+  # `comfortable`). The preset multiplies the whole spacing ladder — it stopped
+  # being inert on 2026-08-04, so it is a real choice now rather than a label.
+  density: normal
+  radius: 8
+  palette:
+    primary: teal
+    success: green
+    warning: amber
+    danger: red
+    surface: gray
+
+pages:
+  - id: report
+    title: Liquidity Report
+    onboarding:
+      title: What this page tells you
+      message: >-
+        Top row: the cash actually on the accounts, how many invoices are still
+        open, and how much of that is already overdue. Below it, the next 13
+        weeks — expected incoming against expected outgoing, one bar per week.
+        At the bottom, the accounts and the bank movements the figures above
+        fold from.
+      when: first_visit
+
+    # ADR-0175 G9 — three tiles across the top, then each block full width.
+    # On mobile the same order collapses into one column.
+    layout:
+      type: grid
+      columns: ["1fr", "1fr", "1fr", "1fr"]
+      gap: 16
+      areas:
+        - "cash open overdue due"
+        - "incoming incoming incoming incoming"
+        - "outgoing outgoing outgoing outgoing"
+        - "book book book book"
+        - "accounts accounts accounts accounts"
+        - "movements movements movements movements"
+      cells:
+        - { view: cash-on-hand, area: cash }
+        - { view: open-invoices-count, area: open }
+        - { view: overdue-amount, area: overdue }
+        - { view: expected-in, area: due }
+        - { view: forecast-incoming, area: incoming, wide: true }
+        - { view: forecast-outgoing, area: outgoing, wide: true }
+        - { view: invoice-book, area: book, wide: true }
+        - { view: account-balances, area: accounts, wide: true }
+        - { view: bank-movements, area: movements, wide: true }
+      breakpoints:
+        - name: mobile
+          columns: ["1fr"]
+          areas:
+            - "cash"
+            - "open"
+            - "overdue"
+            - "due"
+            - "incoming"
+            - "outgoing"
+            - "book"
+            - "accounts"
+            - "movements"
+
+    views:
+      # ── The three headline figures ─────────────────────────────────────────
+      # Cash on hand. The tile SUMS `total_balance` across the projection's rows
+      # — one row per currency — so an overdrawn account pulls the figure down
+      # instead of hiding behind a positive sibling.
+      - id: cash-on-hand
+        type: kpi-tile
+        projection: cash_position
+        measure: total_balance
+        label: Cash on hand
+        format: "currency:EUR"
+
+      # How many invoices are still open — both directions, since a payable is
+      # as much an open invoice as a receivable. The split per direction is the
+      # `invoice-book` table below; this is the one number.
+      - id: open-invoices-count
+        type: kpi-tile
+        projection: invoice_book
+        measure: open_count
+        label: Open invoices
+
+      # What is already late. Folded from BOTH verdicts — still owed
+      # (`settlement: open`, the derived field that picks the tribe's override
+      # over the feed's mirror) AND late (`aging_state: overdue`, written by
+      # the daily ADR-0157 tick). Two fields because they
+      # are two facts: an overdue invoice is still an open one, and a paid one
+      # keeps the record that it was paid late. Correct as of the last tick,
+      # never staler than a day, never a clock-dependent fiction folded at
+      # read time.
+      - id: overdue-amount
+        type: kpi-tile
+        projection: invoice_book
+        measure: overdue_amount
+        label: Overdue
+        format: "currency:EUR"
+
+      # What is still to come in, and WHEN. ADR-0189 D7 — the `trend` block adds
+      # a sparkline beside the figure: the same measure, folded into 13 weekly
+      # buckets along `due_date`. It is the one tile on this page that can carry
+      # one, and that is an ontology fact rather than a taste: a trend buckets
+      # the measure over a DATE FIELD OF THE SAME PROJECTION, and of the four
+      # read-models this report binds only `cash_forecast` has one (`cash_position`
+      # keys on currency, `invoice_book` on direction — neither has a clock).
+      #
+      # Read the two halves separately, because they answer different questions:
+      # the FIGURE sums the measure across every row of the projection — every
+      # open outbound invoice, whenever it falls due — while the SPARKLINE is
+      # only the next 13 weeks. A figure larger than the curve suggests is money
+      # due beyond the window, not a rounding error.
+      #
+      # `start: today` is the intent; the host resolves it where the read is
+      # served, so the sparkline never needs re-cutting.
+      - id: expected-in
+        type: kpi-tile
+        projection: cash_forecast
+        measure: expected_in
+        label: Expected in
+        format: "currency:EUR"
+        trend:
+          over: due_date
+          by: week
+          start: today
+          buckets: 13
+        # The sparkline shares the chart's `--wv-accent` read-site, so a KPI
+        # tile takes the same Tier-2 palette a chart does (ADR-0209 S1) — teal
+        # here, matching the incoming-forecast chart below it.
+        style:
+          palette: [teal]
+
+      # ── The 13-week forecast ───────────────────────────────────────────────
+      # ADR-0154 PR3d — the `window:` block turns the chart's read into a
+      # TimeBucket fold: 13 consecutive 7-day windows along `due_date`, summing
+      # the measure inside each. Two charts rather than one, because the read
+      # plan folds ONE measure per chart (`y[0]`) — and because money in and
+      # money out on a shared axis invites reading a difference that neither
+      # bar states.
+      #
+      # `start: today` is the INTENT, not a date: the host resolves the token
+      # where the read is served, so this window is always the next 13 weeks
+      # and never needs re-cutting. An absolute date here would be correct
+      # exactly until it was old, then silently render an empty chart — which
+      # reads as missing data, not as a stale spec.
+      - id: forecast-incoming
+        type: chart
+        projection: cash_forecast
+        x: due_date
+        y: [expected_in]
+        shape: bar
+        exportable: true
+        window:
+          start: today
+          bucket_days: 7
+          buckets: 13
+        style:
+          palette: [teal]
+
+      # The SAME receivables as `forecast-incoming` above, moved to the day
+      # each debtor is expected to actually pay.
+      #
+      # The pair is readable without arithmetic, which is the point: where a
+      # teal bar has an amber bar to its RIGHT, that money is expected late,
+      # and how far right says by how much. BP-004's invoices shift about
+      # eleven days; BP-006's move three days LEFT, because it pays early.
+      #
+      # `forecast-incoming` is what the contract says. This is what the book
+      # of settled invoices says usually happens — the learned correction to
+      # the due-date assumption, per invoice rather than in aggregate.
+      #
+      # Amber, like every estimate on this page. A Schätzung must never wear
+      # the colour of a fact.
+      - id: verfahren-settlement
+        type: chart
+        projection: expected_settlement
+        x: expected_payment_date
+        y: [expected_in]
+        shape: bar
+        exportable: true
+        window:
+          start: today
+          bucket_days: 7
+          buckets: 13
+        style:
+          palette: [amber]
+
+      # The foreign book, which the four euro read-models deliberately leave
+      # out. No `window`: the question a treasurer asks of currency exposure is
+      # "how much dollar risk am I carrying", not "which Tuesday", so the axis
+      # is the currency.
+      #
+      # THREE series, and that is the whole point of the widget. `expected_eur`
+      # alone is a number that reads as a fact; it is the middle of a range
+      # 2,7 % wide for a dollar invoice a month out. Drawing the band ends
+      # beside it is what the Procedure's own skill file insists on in words —
+      # never report the middle without the band — expressed as a chart that
+      # cannot show one without the others.
+      - id: verfahren-fx-exposure
+        type: chart
+        projection: fx_exposure_outlook
+        x: currency
+        y: [band_low_eur, expected_eur, band_high_eur]
+        shape: bar
+        exportable: true
+        style:
+          palette: [amber]
+
+      - id: forecast-outgoing
+        type: chart
+        projection: cash_forecast
+        x: due_date
+        y: [expected_out]
+        shape: bar
+        exportable: true
+        window:
+          start: today
+          bucket_days: 7
+          buckets: 13
+        style:
+          palette: [amber]
+
+      # ── The Procedure's own curve, and the record it is judged against ─────
+      # ADR-0202 D5's acceptance sentence at the surface. The chart above and
+      # this one answer the SAME question from two different places, and the
+      # difference between them is the whole reason a learned Procedure exists:
+      #
+      #   forecast-incoming  — open invoices on their due dates. The books'
+      #                        answer, and it assumes every debtor pays exactly
+      #                        on time. It knows nothing it was not told.
+      #   verfahren-inflow   — a fitted seasonal model over two years of actual
+      #                        settlements. It knows what usually HAPPENS,
+      #                        including that KW 30 is a trough and nobody pays
+      #                        in the second week of August.
+      #
+      # A gap between the two bars is not an error in either: it is the tribe's
+      # payment behaviour, stated as a number. Amber, deliberately sharing the
+      # colour of the estimate entity — on this page teal means booked and
+      # amber means estimated, and a Schätzung must never wear the colour of a
+      # fact.
+      - id: verfahren-inflow
+        type: chart
+        projection: cash_inflow_outlook
+        x: target_date
+        y: [expected_inflow]
+        shape: bar
+        exportable: true
+        window:
+          start: today
+          bucket_days: 7
+          buckets: 13
+        style:
+          palette: [amber]
+
+      # Backwards, over the same 13-week width — the accuracy trail. This is
+      # what makes the estimate above checkable by an operator rather than
+      # taken on trust: the Procedure wrote one estimate per past Monday and
+      # these are the amounts that actually landed.
+      #
+      # `today-13w` is the same intent token as `today`, offset. An absolute
+      # date would freeze the trail on the day it was authored.
+      - id: actual-inflow
+        type: chart
+        projection: cash_inflow_actual
+        x: paid_date
+        y: [actual_inflow]
+        shape: bar
+        exportable: true
+        window:
+          start: today-13w
+          bucket_days: 7
+          buckets: 13
+        style:
+          palette: [green]
+
+      # ── The lists the figures fold from ────────────────────────────────────
+      # The invoice book per direction — the split behind the "open invoices"
+      # tile, and where a reader sees that inbound and outbound are counted
+      # under one roof.
+      - id: invoice-book
+        type: table
+        source: projection
+        projection: invoice_book
+        columns:
+          - invoice_count
+          - open_count
+          - open_amount
+          - overdue_amount
+
+      # The accounts themselves. `opening_balance` + `opening_date` are on the
+      # type so this table is AUDITABLE: opening balance plus every movement
+      # booked since that date equals `balance`. The seed data is generated to
+      # satisfy exactly that, so the check is one an operator can actually run.
+      - id: account-balances
+        type: table
+        source: entity
+        entity: bank_account
+        exportable: true
+        empty_state:
+          title: No accounts yet
+          message: >-
+            Add your bank accounts, or point the bank feed at your export
+            folder — the balances appear here as soon as the first one lands.
+          when: no_records
+
+      # The movements. Personalizable, so an operator can keep their own
+      # filtered view (ADR-0162) — "only the main account", "only debits".
+      - id: bank-movements
+        type: table
+        source: entity
+        entity: transaction
+        exportable: true
+        personalizable: true
+        empty_state:
+          title: No bookings yet
+          message: >-
+            Bank movements arrive through the hourly `bank-transactions` feed.
+            Point its locator at your export folder to fill this list.
+          when: no_records

@@ -1,0 +1,29 @@
+# `wild tribe apply <bundle> --as <id>` reads this. Schema:
+# `crates/runtime/wild-tribe-ops/src/bundle.rs::BundleManifest`.
+#
+# ADR-0123 Phase 1.5 fixture: one DOCUMENT source accepts both PDF and plain
+# text files. A `processes:` flow routes each file to its own `does: extract`
+# branch via `when: format == '...'` edges; the per-branch `config` carries a
+# distinct `custom_instruction`. The scripted `extract-worker` stand-in echoes
+# the instruction back into the candidate record so the fixture can assert that
+# the tuning actually reached dispatch.
+schema_version: "1"
+
+name: invoice-formats-branch
+description: >-
+  LLM-free end-to-end fixture for per-format branch routing: PDF and TXT files
+  dropped into one folder source are routed to format-specific extract branches,
+  each carrying its own tuning config.
+
+parent_tribe: root
+
+authoring_method: ddd
+
+# The stand-in is uploaded to the daemon's component-type catalog by the
+# fixture script before `tribe apply`; the manifest only declares the
+# dependency so the deploy gate resolves the worker's image.
+external_components:
+  - scripted-extract-worker
+
+workers:
+  - { ref: "workers/extract-stand-in.md" }

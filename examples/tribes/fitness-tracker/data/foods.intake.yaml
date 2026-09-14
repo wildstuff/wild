@@ -1,0 +1,6 @@
+# Auto-intake: the columns map 1:1 onto the `food` type's fields (the runner
+# derives the identity map from the type, ADR-0065 D5), so only target + key +
+# columns ship. `kcal_from_macros` is derived — not a column.
+target_type: food
+key: [food_id]
+columns: [food_id, name, kcal_per_100g, protein_g, carbs_g, fat_g, category, source_url]

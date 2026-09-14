@@ -1,0 +1,599 @@
+// `wild:llm-adapter` — Tier-2 LLM-adapter capability surface.
+//
+// Single-backend chat WIT exported by every Tier-2 wasm-component
+// LLM adapter. Today's three reference implementations live in
+// `plugins/llm/{anthropic-cli, openrouter, openai}/`; future ports
+// (Cohere, Mistral, Together-AI, …) follow the same shape. The
+// host's `LlmAdapterShim` (`crates/runtime/wild-host/src/
+// llm_adapter_shim.rs`) wraps a `ComponentBackedHostPlugin` against
+// this WIT and exposes the component as `Arc<dyn ChatBackend>` so
+// the `BackendRegistry` picks it up.
+//
+// Surface contract:
+//
+//   - **Polarity** — the host CALLS the component's exported
+//     `chat` / `chat-stream` interfaces; the host-side
+//     `wild:ai/chat` capability (host-exported, guest-imported)
+//     is a separate surface that the host fans out to one of these
+//     adapters via the registry.
+//   - **Single-backend per component**. Tools-aggregation,
+//     subject routing, multi-adapter dispatch all live in the
+//     orchestrator — the adapter only sees the prompt and returns
+//     the response.
+//   - **Streaming** is component-driven via the `chat-stream`
+//     interface. The host shim drains `next-chunk` and re-publishes
+//     each delta on NATS as `AiStreamFrame::{TextDelta,
+//     ThinkingDelta, ToolUse}` (see `common::messages`).
+//   - **Errors** — typed two-bucket `chat-error { retryable,
+//     permanent }`. The shim translates to `ChatBackend::chat`'s
+//     `Result<_, String>` — retryable = "5xx-style transient,
+//     retry once"; permanent = "stop, surface to the user".
+//   - **No caller-context, no stream-subject, no mcp-servers** in
+//     the WIT. Caller-identity is the orchestrator's invariant;
+//     stream subjects are host-side; MCP-tools are passed via the
+//     `chat-request.features` `mcp-config:<json>` prefix
+//     convention (see field doc on chat-request).
+//
+// Versioning. 0.1.0 is additive-only. Any breaking change to
+// `chat-request` / `chat-response` bumps to 0.2.0 along with a
+// migration ADR — see `docs/llm-adapters.md` § "WIT versioning"
+// for the policy.
+
+package wild:llm-adapter@0.3.0;
+
+interface chat {
+
+    // ─── content-block tree (mirrors wild:ai@0.4.0) ───
+
+    /// Optional cache marker on a text block. Adapters that
+    /// support prompt-caching (Anthropic, future OpenAI) honour
+    /// this; others ignore. Mirrors `wild:ai/chat::cache-control`.
+    variant cache-control {
+        ephemeral(cache-ttl),
+    }
+
+    record cache-ttl {
+        ttl-seconds: u32,
+    }
+
+    /// One typed content block on a message. Adapters convert
+    /// the variant to the upstream's wire format
+    /// (Anthropic `text` / `thinking` / `tool_use`, OpenAI
+    /// `text` / `tool_calls`, …).
+    variant content-block {
+        text(text-block),
+        thinking(thinking-block),
+        tool-use(tool-call),
+        tool-result(tool-result-block),
+        image(image-source),
+    }
+
+    record text-block {
+        text: string,
+        cache-control: option<cache-control>,
+    }
+
+    record thinking-block {
+        text: string,
+        signature: option<string>,
+    }
+
+    record tool-result-block {
+        tool-use-id: string,
+        content: string,
+        is-error: bool,
+    }
+
+    /// Image content-block source. **Status (May 2026):** the WIT
+    /// + all three adapters' wire-format converters are wired
+    /// end-to-end (openai/openrouter render to OpenAI's
+    /// `image_url` multipart shape; anthropic-cli would render via
+    /// claude's stream-json). NO production caller in the host
+    /// constructs an `image` content-block today — Wild's cycle
+    /// loop, ai-worker, and http-fetcher all stay text-only. The
+    /// surface is kept usable so a future "vision REPL" path
+    /// (`wild chat --image path.png`) or a vision-aware worker can
+    /// drop in without re-bumping the WIT.
+    variant image-source {
+        base64(image-base64),
+        url(string),
+    }
+
+    record image-base64 {
+        media-type: string,
+        data: string,
+    }
+
+    /// Why the assistant stopped generating. Adapter normalises
+    /// from the upstream's `stop_reason` / `finish_reason` /
+    /// `done_reason` into this set.
+    variant stop-reason {
+        end-turn,
+        max-tokens,
+        tool-use,
+        stop-sequence,
+        refusal,
+        other(string),
+    }
+
+    // ─── conversation messages ───
+
+    record message {
+        /// "user" | "assistant" | "tool". Tool-result blocks
+        /// typically ride on user-role turns per Anthropic's
+        /// preferred shape — adapters can re-write the role on
+        /// the wire if their upstream needs "tool".
+        role: string,
+        content: list<content-block>,
+    }
+
+    record tool-definition {
+        name: string,
+        description: string,
+        /// JSON Schema string for the tool's argument shape.
+        parameters-schema: string,
+    }
+
+    record tool-call {
+        id: string,
+        name: string,
+        /// JSON-encoded argument object.
+        arguments: string,
+    }
+
+    // ─── session affinity (mirrors wild:ai@0.3.x) ───
+
+    /// Opaque session identifier. Adapters MUST NOT parse this —
+    /// it's the orchestrator's invariant. Stateful adapters
+    /// allocate a new id on `session-ref.new` and re-enter the
+    /// named id on `session-ref.continue`.
+    record session-id {
+        id: string,
+    }
+
+    /// Session affinity hint on a chat request. Stateless adapters
+    /// silently ignore.
+    variant session-ref {
+        /// Open a fresh session for THIS call. Stateful adapters
+        /// allocate a new session-id and return it on the response.
+        new,
+        /// Re-enter the named session. Stateful adapter looks up
+        /// the id in its pool — hot-path resumes from in-memory
+        /// process, cold-path re-spawns with provider-specific
+        /// resume mechanism (e.g. claude-CLI's `--resume`).
+        %continue(session-id),
+    }
+
+    // ─── token accounting ───
+
+    /// Token accounting. `input-tokens` EXCLUDES the cache counters
+    /// (the Anthropic wire shape) — the full window fill is
+    /// input + cache-read + cache-creation, summed exactly once.
+    /// Adapters whose provider reports a GROSS prompt total (OpenAI
+    /// family: `prompt_tokens` includes the cached prefix) normalise
+    /// by subtracting the cache counters on the way in. Mirrors
+    /// `wild:ai@0.4.0`'s `token-usage`.
+    record token-usage {
+        input-tokens: u32,
+        output-tokens: u32,
+        cache-read-input-tokens: u32,
+        cache-creation-input-tokens: u32,
+    }
+
+    /// ADR-0042 — per-turn latency observability triple. Mirror of
+    /// `wild:ai@0.4.0::latency-metrics`. Adapters with stream-level
+    /// visibility populate this on every chat-response; buffered
+    /// fallbacks leave `latency: None`. All fields in milliseconds.
+    record latency-metrics {
+        ttft-ms: u64,
+        body-ms: u64,
+        total-ms: u64,
+        chunk-count: u32,
+    }
+
+    // ─── request / response ───
+
+    record chat-request {
+        /// System prompt — sets behaviour / role for the
+        /// assistant.
+        system: string,
+        /// Conversation messages in turn order.
+        messages: list<message>,
+        /// Optional tool catalogue. None = chat-only.
+        tools: option<list<tool-definition>>,
+        /// Optional max-tokens cap. None = adapter / model
+        /// default.
+        max-tokens: option<u32>,
+        /// Provider model id ("anthropic/claude-sonnet-4-6",
+        /// "google/gemini-2.5-pro", …). Required — unlike
+        /// `wild:ai/chat` 0.3.x where it's option<string>, the
+        /// Tier-2 surface enforces L6's strict-model rule:
+        /// every chat call MUST name its model so the adapter
+        /// has nothing to fall back to.
+        model: string,
+        /// Provider-feature toggles. Adapters silently ignore
+        /// unknown strings — operators experiment per-call without
+        /// a schema bump.
+        ///
+        /// **Prefix registry.** New entries SHOULD use a
+        /// dotted-or-colon prefix to avoid collisions:
+        ///
+        ///   - `mcp-config:<json>` — claude-CLI's `--mcp-config`
+        ///     payload. Set by `LlmAdapterShim` for the
+        ///     `anthropic-cli` slug only; other adapters drop it.
+        ///   - `wild.*` — reserved for first-party host extensions.
+        ///   - `<adapter-slug>.*` — adapter-private. Other adapters
+        ///     MUST NOT consume.
+        ///
+        /// Bare strings without a prefix are reserved for future
+        /// boolean toggles (e.g. `parallel-tool-calls`) and
+        /// SHOULD be added to this registry comment when minted.
+        /// A future schema bump may turn this into a typed record;
+        /// for now the prefix convention keeps the surface
+        /// experimentation-friendly without silent collisions.
+        features: list<string>,
+        /// ADR-0204 D5 — per-call sampling temperature. Adapters that
+        /// cannot honor the knob ignore it; a declared override that
+        /// does nothing is a house-rule lie. Omitted / None keeps the
+        /// adapter's default temperature.
+        temperature: option<f64>,
+        /// Opt-in session affinity hint. None = stateless path
+        /// (every adapter); some(session-ref.new) = stateful
+        /// adapter opens a new session for this call;
+        /// some(session-ref.continue(id)) = re-enter named
+        /// session. Stateless adapters (openrouter, claude-direct,
+        /// ollama-default) silently ignore the field.
+        ///
+        /// Default None — additive within 0.1.0; 0.1.0 callers
+        /// stay compatible.
+        session: option<session-ref>,
+    }
+
+    record chat-response {
+        /// Assistant's text response. None when the response is
+        /// pure tool-use (every block is a `tool-use` content
+        /// block; aggregated text is empty).
+        content: option<string>,
+        /// Tool-use blocks the assistant emitted, lifted into a
+        /// flat list at the top level for caller convenience.
+        tool-calls: list<tool-call>,
+        usage: token-usage,
+        /// The actual model that served the response. Adapters
+        /// echo back the request's `model` unless the upstream
+        /// rerouted (e.g. OpenRouter's auto-fallback chain).
+        model: string,
+        /// Why generation stopped. Adapters SHOULD always set
+        /// this; the host shim treats `None` as `end-turn` for
+        /// compatibility but a missing value is a bug.
+        stop-reason: option<stop-reason>,
+        /// Session id assigned by a stateful adapter when the
+        /// request opened (session-ref.new) or extended
+        /// (session-ref.continue) a session. None for stateless
+        /// adapters or when the caller did not request a session.
+        ///
+        /// Default None — additive within 0.1.0.
+        session-id: option<session-id>,
+        /// ADR-0042 — optional latency-observability triple.
+        /// Some(_) when the adapter could observe chunk-level
+        /// stream timing; None for buffered fallbacks. Additive
+        /// within 0.1.0 — pre-ADR-0042 adapters compile unchanged
+        /// with `latency: None`.
+        latency: option<latency-metrics>,
+    }
+
+    /// Failure surface for the chat call. Two-bucket split lets
+    /// the host shim apply a uniform retry policy without per-
+    /// adapter heuristics:
+    ///
+    ///   - `retryable(reason)` — transient: HTTP 5xx, network
+    ///     reset, upstream rate-limit-with-retry-after. The shim
+    ///     retries once with a small backoff before surfacing.
+    ///   - `permanent(reason)` — caller error or unrecoverable:
+    ///     HTTP 4xx (auth, quota, bad request), schema validation
+    ///     failure, missing api-key. The shim surfaces immediately.
+    ///
+    /// Reason strings are human-readable; the host shim copies
+    /// them verbatim into `ChatBackend::chat`'s `Result<_, String>`
+    /// error arm so `wild doctor` and the per-adapter test
+    /// command show the upstream message.
+    variant chat-error {
+        retryable(string),
+        permanent(string),
+    }
+
+    // ─── capability discovery ───
+
+    /// Adapter capability profile. Host-callers query this once at
+    /// registration to learn what the adapter supports, instead of
+    /// branching on the adapter slug ("if anthropic-cli, send
+    /// mcp-config; else render tools as XML"). All fields are
+    /// statically known by the adapter and cheap to return.
+    ///
+    /// Additive within 0.1.0: new fields default to a conservative
+    /// value (false / 0 / empty list) so older adapter components
+    /// still compile, and callers branch only on fields they need.
+    record adapter-info {
+        /// Adapter slug — matches the wasm-component package name
+        /// (`anthropic-cli`, `openrouter`, `openai`). Telemetry
+        /// tag; host-side `slug == "anthropic-cli"` checks SHOULD
+        /// be replaced by capability-bool checks below.
+        name: string,
+        /// Adapter-component semver. Lifecycle marker for
+        /// operators investigating drift; not used for routing.
+        version: string,
+        /// Upstream provider family. One of: "anthropic" |
+        /// "openai" | "openrouter" | "local" | "other". Free-form
+        /// string (not enum) so a new provider doesn't force a
+        /// WIT change — values evolve in the docstring.
+        provider-family: string,
+        /// Adapter exports `chat-stream`. Mirrors which world the
+        /// component opted into (`llm-adapter-streaming-plugin`
+        /// vs `llm-adapter-plugin`); duplicating it here gives
+        /// callers a single source instead of two.
+        supports-streaming: bool,
+        /// Adapter honours `chat-request.session` (some(new) /
+        /// some(continue(id))). False for stateless adapters
+        /// (openai-style HTTP), true for the anthropic-cli
+        /// session-id pass-through.
+        supports-session-affinity: bool,
+        /// Adapter passes `chat-request.tools` to the upstream as
+        /// a structured field (Anthropic Messages API `tools`,
+        /// OpenAI function-calling). False = adapter renders
+        /// tools as XML inside the system-prompt as a fallback
+        /// (anthropic-cli without `--mcp-config`).
+        supports-tool-use-native: bool,
+        /// Adapter honours `cache-control` markers on text
+        /// blocks. False = markers are stripped or never set.
+        /// When true, callers MAY mark stable prefixes for the
+        /// upstream's prompt cache.
+        supports-prompt-caching: bool,
+        /// Maximum number of `cache-control` breakpoints the
+        /// upstream accepts in a single request. 0 = no caching.
+        /// Anthropic's API today caps at 4 (system + tools + last
+        /// 2 messages); OpenAI's automatic prefix-cache has no
+        /// caller-visible breakpoint count.
+        max-cache-breakpoints: u32,
+        /// Cache TTLs the upstream honours, as human-readable
+        /// strings ("5m" / "1h"). Empty when caching is off.
+        supported-cache-ttls: list<string>,
+        /// ADR-0308 D2 — the context window, in tokens, of the model
+        /// THIS adapter instance is configured for. The adapter is the
+        /// only party that can answer without a human maintaining the
+        /// number: it knows its model, and the upstream can change the
+        /// figure under a stable model id.
+        ///
+        /// `none` = the adapter does not know (a local runtime whose
+        /// model is swapped underneath it, an aggregator fronting many
+        /// models with one entry). The host then falls back down its
+        /// ladder — it never substitutes a guess for a `none` here.
+        ///
+        /// Per INSTANCE, not per call: one `llm-adapters.yaml` entry
+        /// pins one model, and `info()` is queried once that config is
+        /// in hand. An adapter that genuinely serves several models per
+        /// entry reports `none` rather than one of them.
+        context-window: option<u32>,
+        /// Adapter emits `thinking-block` content on responses
+        /// (Anthropic extended thinking; OpenAI o-series
+        /// `reasoning_content`). False = thinking blocks never
+        /// appear; callers MUST NOT rely on them.
+        supports-thinking-blocks: bool,
+        /// Feature-string prefixes from `chat-request.features`
+        /// that this adapter consumes. Replaces the silent-ignore
+        /// convention documented on the field with an explicit
+        /// list, so callers can detect dead features at
+        /// registration time instead of at request time.
+        ///
+        /// Examples: `["mcp-config:", "anthropic-cli."]` for
+        /// anthropic-cli; `[]` for stateless adapters with no
+        /// adapter-private features.
+        understood-feature-prefixes: list<string>,
+    }
+
+    /// Return the adapter's capability profile. Pure static call
+    /// — adapters MUST return the same value every time within a
+    /// process. The host shim caches the result at registration
+    /// time and exposes it via `BackendRegistry` lookup; runtime
+    /// re-calls are valid but redundant.
+    info: func() -> adapter-info;
+
+    /// The single chat call. Synchronous from the wasm side —
+    /// any streaming behaviour lives in the `chat-stream`
+    /// interface below.
+    chat: func(request: chat-request) -> result<chat-response, chat-error>;
+}
+
+/// Component-side streaming surface. Include the
+/// `llm-adapter-streaming-plugin` world to export it (or add
+/// `export chat-stream` + `export chat-stream-native` directly
+/// to your own world).
+///
+/// NOT optional in practice: the host binds the
+/// `llm-adapter-host` world below, and its typed accessors
+/// resolve `chat`, `chat-stream` AND `chat-stream-native` at
+/// registration — before any dispatch. A component exporting
+/// only `chat` fails that export lookup and never loads. (An
+/// earlier shim wrapped a buffered `chat()` in a single Done
+/// frame as a fallback; ADR-0100 D3 retired that path when the
+/// native stream became the sole streaming lane.) Every
+/// reference adapter, and the published
+/// `examples/llm-adapters/echo-llm` sample, exports all three.
+///
+/// Pattern: caller submits a chat-request, gets back an opaque
+/// `chat-stream-handle` resource, polls `next-chunk` for
+/// incremental text-delta / thinking-delta / tool-call updates
+/// until it returns `none` (= stream ended cleanly). On error
+/// the resource yields a `chat-error` and is dead.
+interface chat-stream {
+    use chat.{chat-request, chat-error, tool-call, token-usage,
+              stop-reason, session-id};
+
+    /// One incremental chunk of streaming output. Visible text
+    /// fills `text-delta`; extended-thinking fills
+    /// `thinking-delta`; tool-call fragments fill `tool-calls`
+    /// (plugins that accumulate emit on the final chunk only,
+    /// plugins that stream emit per fragment). The chunk with
+    /// `is-final == true` is the terminator and carries the
+    /// final usage + stop-reason + model + session-id.
+    record token-chunk {
+        /// Incremental visible text. None when the chunk only
+        /// carries a thinking or tool-call delta, or when the
+        /// chunk is the final-chunk wrapper.
+        text-delta: option<string>,
+        /// Incremental extended-thinking / reasoning text. Set
+        /// when the upstream emits a thinking-delta separately
+        /// from the visible reply (Anthropic extended thinking,
+        /// OpenAI o-series `reasoning_content`, DeepSeek-R1 /
+        /// QwQ `<think>...</think>` blocks parsed by the
+        /// adapter). UIs typically render this dimmer or in a
+        /// collapsed pane. None on chunks without thinking
+        /// content.
+        thinking-delta: option<string>,
+        /// Tool-call delta. Adapters that don't stream tool
+        /// calls keep this empty until the final chunk; ones
+        /// that stream incrementally fill it on the chunks
+        /// where the upstream sends fragments — the host shim
+        /// re-publishes as `AiStreamFrame::ToolUse` so live UIs
+        /// see the call land before the model's reply
+        /// terminates.
+        tool-calls: list<tool-call>,
+        /// True only on the very last chunk.
+        is-final: bool,
+        /// On `is-final == true` only: cumulative usage.
+        usage: option<token-usage>,
+        /// On `is-final == true` only: the model that actually
+        /// served the response (echoes request's model unless
+        /// upstream rerouted).
+        model: option<string>,
+        /// On `is-final == true` only: why generation stopped.
+        stop-reason: option<stop-reason>,
+        /// On `is-final == true` only: session id assigned by a
+        /// stateful adapter when the request opened
+        /// (`session-ref.new`) or extended
+        /// (`session-ref.continue`) a session. None for
+        /// stateless adapters or when the caller did not
+        /// request a session. Mirrors `chat-response.session-id`
+        /// — streaming callers that need session affinity for
+        /// the next turn read it from here instead of having to
+        /// fall back to the buffered `chat()` path.
+        session-id: option<session-id>,
+    }
+
+    /// Open a streaming chat. Adapters spawn whatever upstream
+    /// connection they need (HTTPS+SSE for openrouter / openai,
+    /// `wild:cli-exec/exec.exec-streaming` over `claude` for
+    /// anthropic-cli). The handle is the per-call cursor; drop
+    /// without `cancel()` triggers an implicit cancel.
+    chat-streaming: func(request: chat-request) -> result<chat-stream-handle, chat-error>;
+
+    /// Per-stream cursor. Caller drives `next-chunk` until it
+    /// returns `none` (= stream complete). Handle is dead
+    /// after that — re-instantiate by calling `chat-streaming`
+    /// again.
+    ///
+    /// **Cancellation semantics.** When the host shim's outer
+    /// chat-future is dropped (operator-side timeout, ctrl-C,
+    /// parent task cancelled), the resource is dropped and the
+    /// adapter MUST treat that as an implicit `cancel()` — i.e.
+    /// abort any in-flight upstream HTTP request / kill the
+    /// subprocess. Polling `next-chunk` on a cancelled handle is
+    /// undefined; the host shim doesn't do it. There's no
+    /// backpressure surface — the adapter SHOULD bound its own
+    /// per-chunk buffering (the `chat-stream-handle` lives only
+    /// as long as the host's drain loop, so a slow consumer
+    /// applies backpressure naturally via the call rate of
+    /// `next-chunk`).
+    resource chat-stream-handle {
+        /// Next chunk in the stream:
+        ///   ok(some(chunk)) — chunk available
+        ///   ok(none)        — stream complete; handle dead
+        ///   err(...)        — adapter error; handle dead
+        next-chunk: func() -> result<option<token-chunk>, chat-error>;
+
+        /// Cancel the upstream call. Idempotent. Drop without
+        /// cancel() triggers an implicit cancel.
+        cancel: func();
+    }
+}
+
+/// ADR-0100 D3 — native component-model-async token streaming. The
+/// adapter PRODUCES a `stream<token-chunk>` + a `future<chat-response>`
+/// instead of the poll-cursor `chat-stream.next-chunk`; the host drains
+/// both concurrently (`dispatch_streaming_native`, idle-timeout-guarded
+/// because the epoch fence does not bound a yielding stream). Reuses
+/// the `chat-stream` `token-chunk` record and the `chat` request /
+/// response / error verbatim — the terminal usage/model/stop-reason
+/// resolve on the response `future`, so `is-final` on a native chunk is
+/// purely informational.
+///
+/// Requires wit-bindgen 0.58 (the `async func` + `stream`/`future` are
+/// uncodegenable by 0.35). All three reference adapters are on 0.58 and
+/// export this — the host drives ONLY the native path (the poll-cursor
+/// `chat-stream` above is retained in the contract but no longer drained
+/// by the shim). Folded in from the interim isolated
+/// `wild:llm-adapter-stream@0.1.0` package once every adapter migrated.
+interface chat-stream-native {
+    use chat.{chat-request, chat-response, chat-error};
+    use chat-stream.{token-chunk};
+
+    /// Open a native streaming chat. Returns the live token stream AND a
+    /// future resolving to the terminal response once the stream
+    /// completes (carrying final usage, model, stop-reason, session-id,
+    /// latency). `async func` because the host drives both halves
+    /// concurrently on the `Accessor` path.
+    chat-streaming-native: async func(request: chat-request)
+        -> result<tuple<stream<token-chunk>, future<chat-response>>, chat-error>;
+}
+
+/// Bumped world: every adapter that opts into streaming lists
+/// this instead of `llm-adapter-plugin`. Existing openrouter
+/// continues to compile against `llm-adapter-plugin` until it
+/// opts in.
+world llm-adapter-streaming-plugin {
+    include wild:plugin-meta/plugin-base@0.3.0;
+    import wild:secrets/store@0.1.0;
+    import wasi:http/outgoing-handler@0.2.0;
+    export chat;
+    export chat-stream;
+    // ADR-0100 D3 — native token stream. All three 0.58 adapters export
+    // this via the include; the host binds + drives it as the sole
+    // streaming path.
+    export chat-stream-native;
+}
+
+/// World every Tier-2 LLM-adapter component implements. Inherits
+/// `wild:plugin-meta/plugin-base@0.3.0` (the meta lifecycle the
+/// `ComponentBackedHostPlugin` shim drives) and adds the
+/// capability-specific imports + the chat export.
+///
+/// The two import packages are the typical Tier-2 LLM-adapter
+/// shape:
+///   - `wild:secrets/store` — read the api-key alias.
+///   - `wasi:http/outgoing-handler` — call the upstream LLM
+///     provider's HTTPS endpoint.
+///
+/// Adapter authors who need additional capabilities extend their
+/// own world by listing additional imports — the host's `requires:`
+/// cross-check picks the extension up.
+world llm-adapter-plugin {
+    include wild:plugin-meta/plugin-base@0.3.0;
+    import wild:secrets/store@0.1.0;
+    import wasi:http/outgoing-handler@0.2.0;
+    export chat;
+}
+
+/// Host-side bindgen target. The `LlmAdapterShim` in
+/// `wild-host/src/llm_adapter_shim.rs` generates against this
+/// world to call into a guest's exported `chat` interface
+/// without dragging in the guest-side imports
+/// (`wild:secrets/store`, `wasi:http/outgoing-handler`) — those
+/// are wired by the shim's `LinkerSeed` already, separately.
+/// Splitting the host-bindgen world from the plugin-implements
+/// world keeps the trait surface narrow.
+world llm-adapter-host {
+    export chat;
+    export chat-stream;
+    // ADR-0100 D3 — the shim binds + drives the native producer as the
+    // sole streaming path (all adapters are 0.58). Shared bindgen module
+    // with chat/chat-stream, so the native records ARE the poll records.
+    export chat-stream-native;
+}

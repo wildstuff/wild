@@ -1,0 +1,20 @@
+stateDiagram-v2
+    [*] --> Dormant: you describe an idea<br/>to Elder (Intake)
+    Dormant --> Dormant: shape & refine<br/>in conversation (Mentor)
+    Dormant --> Active: activate<br/>(Chief spawns, cycles begin)
+    Active --> Active: run cycles,<br/>operate (Operate)
+    Active --> Paused: pause
+    Paused --> Active: resume
+    Active --> Archived: archive
+    Paused --> Archived: archive
+    Archived --> [*]
+
+    note right of Dormant
+        Charter on disk.
+        No workers. ~zero cost.
+    end note
+    note right of Active
+        Workers spawned.
+        Cycles firing.
+        Costs money.
+    end note

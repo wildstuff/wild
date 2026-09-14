@@ -1,0 +1,4 @@
+invoice_id,currency,amount_foreign,rate_per_eur,rate_date,days_to_settlement,procedure_version
+RE-2026-0050,USD,24000.00,1.1485,2026-07-31,7,v1
+RE-2026-0051,GBP,12000.00,0.85573,2026-07-31,4,v1
+RE-2026-0052,CHF,9500.00,0.9304,2026-07-31,12,v1

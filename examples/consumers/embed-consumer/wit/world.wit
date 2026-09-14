@@ -1,0 +1,48 @@
+// Reference CONSUMER world for the `wild:ai/embed` modality.
+//
+// The mirror-image of an adapter: an adapter *exports*
+// `wild:embed-adapter` and the host serves `wild:ai/embed` on top of
+// it; THIS component *imports* `wild:ai/embed` and calls it. It is the
+// copy-paste starting point for any text → vector caller (RAG,
+// similarity-search, dedup, entity-linking).
+//
+// Shape = workload-flavor Tier-2 plugin (the ai-worker shape, minus
+// chat/files/tools):
+//
+//   - `export wild:plugin-meta/meta@0.3.0` — every Tier-2 plugin
+//     self-reports its manifest; the host cross-checks it against the
+//     sidecar at load time (ADR-0045 §5).
+//   - `import wild:ai/embed@0.4.0` — the modality this example exists
+//     to demonstrate. NOTE the import carries a version (`@0.4.0`):
+//     wit-bindgen's `generate_all` needs the explicit pin to resolve
+//     the `embed` interface out of the `wild:ai` package.
+//   - `caller_context.kind` is the routing token; `model: none` lets the
+//     host resolver pick the adapter from `<profile_root>/embed-adapters.yaml`.
+//   - `import wild:messaging/consumer` — publish the result back.
+//   - `export wild:messaging/handler` — there is no arbitrary export
+//     the host calls; a workload is driven by a NATS message. The host
+//     invokes `handle-message` for every message on the
+//     manifest-declared subscription (here `wild.{tribe}.embed.req`).
+
+package wildstuff:embed-consumer@0.1.0;
+
+world embed-consumer {
+    // ── Plugin contract — workload-flavor ──
+    // Explicit `export ...meta` rather than `include plugin-base`:
+    // wit-bindgen 0.35's include-with-other-exports surfaces the
+    // included world's exports inconsistently when the host world has
+    // its own export (the ai-worker world hit the same and uses the
+    // explicit form).
+    export wild:plugin-meta/meta@0.3.0;
+
+    // ── The modality under demonstration ──
+    import wild:ai/embed@0.4.0;
+
+    // ── Messaging: publish the result / error ──
+    import wild:messaging/consumer@0.3.0;
+
+    // ── Wake-up entry point ──
+    // The host's NatsMessagingPlugin invokes `handle-message` for every
+    // NATS message on the manifest-declared subscription.
+    export wild:messaging/handler@0.3.0;
+}

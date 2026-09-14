@@ -1,0 +1,162 @@
+// `wild:tools` — host-side tool-catalog surface that wasm components
+// consume to fetch + invoke tools dynamically.
+//
+// Plugin Concept post-W4 follow-up. P3 W2 landed `wild:tool-provider`
+// (which tool-pack plugins EXPORT) plus the host-internal Rust
+// `ToolProviderRegistry` that aggregates per-plugin catalogs. This
+// package fills the missing link — the WIT consumers IMPORT to reach
+// the registry from inside their wasm sandbox:
+//
+//   tool-pack plugin (provider-flavor)
+//       │ exports wild:tool-provider/tools
+//       ↓
+//   host-side ToolProviderRegistry (Rust struct, aggregates per-plugin
+//                                   catalogs, routes invoke by name,
+//                                   first-wins-by-pool_priority on
+//                                   conflicts)
+//       │ exposed via this WIT
+//       ↓
+//   workload-flavor consumer (ai-worker, orchestrator, …)
+//       imports wild:tools/catalog + wild:tools/invoke
+//
+// Why two interfaces (catalog + invoke) instead of one:
+//
+//   The trust-gate (D3 Stage-2) treats each import individually. A
+//   future Sprint-3.5 may want `wild:tools/catalog` to be a wider
+//   permission ("read tool list for prompt-engineering") than
+//   `wild:tools/invoke` ("actually execute"). Today they're handed
+//   out together by default — but the split is in the WIT for the
+//   day someone wants to grant catalog-only access.
+//
+// Why not extend `wild:tool-provider` instead:
+//
+//   `wild:tool-provider/tools` is the PROVIDER side (what a plugin
+//   exports). Consumers import a different shape — they don't
+//   `list-tools()` per plugin, they get the AGGREGATED catalog
+//   across all loaded providers. Mirroring the same interface name
+//   on both sides would conflate the two perspectives. Separate
+//   packages keep the trust-graph and bindgen-generation clean.
+//
+// Heritage:
+//
+//   The `tool-spec` + `tool-result` + `tool-error` records are
+//   field-identical to `wild:tool-provider/tools`'s versions on
+//   purpose — the host pass-through is mechanical, no shape change.
+//   `plugin-slug` was added to `tool-spec` here because the host
+//   knows which plugin owns each catalog entry; provider-side it
+//   doesn't (a plugin only knows its own tools).
+
+package wild:tools@0.2.0;
+
+interface catalog {
+    /// Aggregated tool entry across every loaded tool-provider plugin.
+    /// Mirrors `wild:tool-provider/tools.tool-spec` plus a
+    /// `plugin-slug` field so the consumer can audit-log which
+    /// plugin will service the call.
+    record tool-spec {
+        /// Stable tool name. Globally unique across all loaded
+        /// providers — registry's first-wins-by-pool_priority policy
+        /// resolves conflicts before the consumer sees them.
+        name: string,
+
+        /// LLM-facing description.
+        description: string,
+
+        /// JSON Schema for the args. Pass-through to the LLM's
+        /// tool-call surface verbatim.
+        json-schema: string,
+
+        /// Plugin slug that owns this tool. Useful for audit +
+        /// `wild plugin doctor`-style reporting; the consumer
+        /// doesn't need it for dispatch.
+        plugin-slug: string,
+    }
+
+    /// Snapshot of every tool currently registered. Called once
+    /// per LLM-call by consumers (ai-worker's tool-loop, the
+    /// orchestrator). Cheap on the host side — the registry's
+    /// catalog is pre-aggregated at boot.
+    list-tools: func() -> list<tool-spec>;
+}
+
+interface invoke {
+    /// Successful invocation result. Identical shape to
+    /// `wild:tool-provider/tools.tool-result`.
+    record tool-result {
+        json-output: string,
+        cost-units: option<u64>,
+    }
+
+    /// Typed failure modes. Same five-arm shape as
+    /// `wild:tool-provider/tools.tool-error` plus `not-granted`
+    /// for the trust-gate boundary.
+    variant tool-error {
+        /// Name doesn't match any registered tool. Could be a
+        /// stale catalog (consumer cached a name that's been
+        /// revoked) or an LLM hallucination.
+        unknown-tool(string),
+
+        /// args-json doesn't match the tool's json-schema.
+        invalid-args(string),
+
+        /// Tool ran but its work failed (network, division-by-zero,
+        /// missing secret).
+        execution-failed(string),
+
+        /// Host-enforced timeout on the WIT call.
+        timeout,
+
+        /// Caller's plugin trust tier doesn't grant invoke access
+        /// to this tool. v0.1.0 doesn't gate per-tool
+        /// (host-exported plugin trusts every consumer that
+        /// imports `wild:tools/invoke`); v0.2.0 may. The variant
+        /// is in the WIT today so future tightening doesn't bump
+        /// the major.
+        not-granted(string),
+    }
+
+    /// Dispatch by name. The host's `ToolProviderRegistry` looks
+    /// up the providing plugin, acquires a pool member, calls
+    /// the plugin's `wild:tool-provider/tools.invoke`, returns
+    /// the result.
+    invoke: func(name: string, args-json: string) -> result<tool-result, tool-error>;
+}
+
+// ADR-0100 D4 — streaming tool dispatch. Where `invoke` returns ONE
+// `tool-result` (a JSON string) and a tabular consumer poll-loops it in ranged
+// chunks, `invoke-stream` returns ALL decoded rows as a native
+// component-model `stream<row>` the consumer drains once. The host RELAYS: it
+// acquires the tool's provider (csv/json parser), drives that provider's
+// `wild:tool-provider/decoder.decode-stream` (parse once), and re-emits the
+// rows into THIS stream — so the row-stream crosses the two pooled guest
+// instances (consumer → host → provider) through the host. Same effect-gate +
+// audit seam as `invoke`. `async func`: the host serves it under
+// `run_concurrent`; a consumer drains it from an async export.
+//
+// Additive on the unpublished `wild:tools@0.2.0` (no bump). A SEPARATE
+// interface from `invoke` so the trust-gate can grant streaming dispatch
+// independently (the same catalog-vs-invoke split rationale above). Named
+// `streaming` (not `stream`) — `stream` is a reserved WIT keyword.
+interface streaming {
+    /// One decoded row — canonical-string cells (same shape as the poll path's
+    /// `rows[]` entries from a `<x>-decode` tool-result).
+    record row {
+        cells: list<string>,
+    }
+
+    /// Stream every decoded row for tool `name` with `args-json` (the same
+    /// decode args as `invoke`, minus the range cursor). On the error path the
+    /// string carries the underlying tool-error detail.
+    invoke-stream: async func(name: string, args-json: string) -> result<stream<row>, string>;
+}
+
+/// `tools-host` — the world a wasm consumer imports to get both
+/// catalog + invoke. Mirrors the `*-host` shape every other wild
+/// plugin world uses (`secrets-host`, `blobs-host`, …).
+world tools-host {
+    import catalog;
+    import invoke;
+    // ADR-0100 D4 — the streaming dispatch half (opt-in; a consumer imports it
+    // only if it drains row-streams, e.g. the intake runner).
+    import streaming;
+}

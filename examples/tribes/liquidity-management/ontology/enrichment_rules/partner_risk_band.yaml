@@ -1,0 +1,21 @@
+# ADR-0102 Phase 1 — the reusable `enrichment_rule` record form of the template's
+# boundary-enricher showcase (the marks→records adoption, ADR-0110 follow-up).
+#
+# This REPLACES the `enriched_by: "@partner_risk_band"` field mark that previously
+# sat on `business_partner.risk_band` (see ontology/seeds.yaml). The host lowers
+# BOTH forms at the single site (`build_enrich_plan`, I1) to the identical
+# `EnrichNode`, so the enrichment behaviour is byte-for-byte unchanged — the point
+# is to exercise the bundle-declarative `enrichment_rule` authoring lane end-to-end
+# (the operator/chief twins are `data_deltas` + `atlas_put_record`).
+#
+# `inputs` is omitted: an empty list derives the function's args from its backing
+# (`@partner_risk_band` reads `payment_terms_days` from its `expr`), exactly as a
+# field mark does. `risk_band` stays DECLARED on the type (I3 — the output field is
+# a Shape concern authored separately); this record only fills it at intake.
+slug: partner-risk-band
+applies_to: business_partner
+function: partner_risk_band
+outputs:
+  - from_key: risk_band
+    to_field: risk_band
+timing: boundary

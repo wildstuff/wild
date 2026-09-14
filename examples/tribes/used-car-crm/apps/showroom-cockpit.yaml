@@ -1,0 +1,169 @@
+# ADR-0154 — the operator-published end-user app: a composition of VIEWS over
+# this tribe's ontology, interpreted by one generic renderer. Every slug below
+# RESOLVES against `../ontology/model.yaml`:
+#   entities    — vehicle, customer, viewing
+#   projections — vehicle_interest, viewings_by_day
+#   effects     — schedule_viewing
+# The presentation (column order, titling, currency formatting) comes from the
+# ontology's reading marks (ADR-0155), not from this file — this file composes.
+#
+# What is deliberately NOT here: any view over `pricing_floor`. The internal
+# minimum price stays off every published surface — the model marks it
+# `sensitive` and this app simply never binds it; the owner reads it in the
+# operator dashboard, not in a published app.
+
+id: showroom-cockpit
+name: Showroom Cockpit
+# NO `default_tribe:` ON PURPOSE — absent, every view binds the CARRIER (the
+# tribe the app is published under), so this bundle deploys correctly under
+# any `--as <id>`.
+branding:
+  # A tiny inline-SVG logo (data-URI) — keeps the bundle self-contained.
+  logo: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect x='2' y='10' width='20' height='7' rx='2' fill='%231f6feb'/><circle cx='7' cy='18' r='2.5' fill='%23222'/><circle cx='17' cy='18' r='2.5' fill='%23222'/><path d='M5 10l3-4h8l3 4' stroke='%231f6feb' stroke-width='2' fill='none'/></svg>"
+  accent: teal
+  color_scheme: system
+  # The default density: this is a glance-and-go surface for the sales floor,
+  # not an all-day working ledger (contrast the liquidity cockpit's `compact`).
+  density: normal
+  radius: 8
+  palette:
+    primary: teal
+    success: green
+    warning: amber
+    danger: red
+    surface: gray
+
+pages:
+  # ── Overview: demand at a glance ─────────────────────────────────────────
+  - id: overview
+    title: Overview
+    onboarding:
+      title: Welcome to the Showroom Cockpit
+      message: >-
+        At a glance: how much interest each vehicle draws and how full the
+        viewing calendar is. The stock is under "Vehicles", the appointments
+        under "Viewings".
+      when: first_visit
+    layout:
+      type: grid
+      columns: ["1fr", "1fr"]
+      gap: 16
+      areas:
+        - "kpi1 kpi2"
+        - "interest interest"
+      cells:
+        - { view: inquiries-tile, area: kpi1 }
+        - { view: viewings-tile, area: kpi2 }
+        - { view: vehicle-interest-chart, area: interest, wide: true }
+      breakpoints:
+        - name: mobile
+          columns: ["1fr"]
+          areas:
+            - "kpi1"
+            - "kpi2"
+            - "interest"
+    views:
+      # view — total inquiry volume, the demand headline
+      - id: inquiries-tile
+        type: kpi-tile
+        projection: vehicle_interest
+        measure: inquiry_count
+        label: Inquiries
+
+      # view — total appointment load
+      - id: viewings-tile
+        type: kpi-tile
+        projection: viewings_by_day
+        measure: viewings
+        label: Viewings
+
+      # view — inquiries per vehicle: which cars draw attention, which sit
+      # quiet. ONE measure per chart (the read plan folds y[0] only).
+      - id: vehicle-interest-chart
+        type: chart
+        projection: vehicle_interest
+        x: vehicle_id
+        y:
+          - inquiry_count
+        shape: bar
+        exportable: true
+        style:
+          palette: [teal]
+
+  # ── Vehicles: the mirrored stock ─────────────────────────────────────────
+  - id: vehicles
+    title: Vehicles
+    views:
+      # view — the stock table (columns derived from the ontology reading;
+      # salience orders them, ADR-0155). Personalizable, so a salesperson can
+      # save a filtered view (ADR-0162).
+      - id: stock-table
+        type: table
+        source: entity
+        entity: vehicle
+        exportable: true
+        personalizable: true
+        empty_state:
+          title: No vehicles yet
+          message: >-
+            As soon as the mobile.de sync delivers its first export (or the
+            seed data loads), the stock appears here.
+          when: no_records
+
+      # view — a single-vehicle detail card, wired to the stock table's
+      # selected record (ADR-0175 D16 cross-view record_selected).
+      - id: vehicle-detail
+        type: detail-card
+        entity: vehicle
+        record_source: stock-table
+        fields:
+          - price_eur
+          - mileage_km
+          - first_registration
+          - status
+
+  # ── Viewings: the calendar — the appointment surface of the concept ─────
+  - id: viewings
+    title: Viewings
+    views:
+      # view — every viewing on its DATE (ADR-0154 D11): the lot's calendar,
+      # day by day. This is the "Besichtigungstermin" surface of the concept.
+      - id: viewing-calendar
+        type: table
+        source: entity
+        entity: viewing
+        representation: calendar
+        date_field: date
+
+      # view — the same viewings as a KANBAN over the tribe-owned lifecycle.
+      - id: viewing-board
+        type: timeline
+        source: entity
+        entity: viewing
+        group_by: status
+        lanes:
+          - requested
+          - confirmed
+          - completed
+          - cancelled
+          - no_show
+
+      # view — a governed-effect form invoking the schedule_viewing verb.
+      # Audience-gated to operators — a customer books through the chat, not
+      # through a raw form.
+      - id: schedule-form
+        type: effect-form
+        effect: schedule_viewing
+        audience:
+          roles: [operator]
+
+  # ── Search: find a car or a customer ─────────────────────────────────────
+  - id: search
+    title: Search
+    views:
+      - id: record-search
+        type: search
+        placeholder: Search for make, model or customer …
+        entities:
+          - vehicle
+          - customer

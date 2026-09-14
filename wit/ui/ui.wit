@@ -1,0 +1,65 @@
+// `wild:ui/widget` — Tier-2 UI-widget capability surface.
+//
+// A widget renders one view inside an operator-published app (ADR-0154).
+// It receives its view configuration and already-fetched data as JSON strings,
+// and returns an HTML fragment. The host places that fragment inside the
+// view's card; the widget never gets direct DOM or network access beyond the
+// WIT imports it declares.
+//
+// Composition (widget-flavor):
+//
+//   world widget-plugin {
+//       include wild:plugin-meta/plugin-base@0.3.0;
+//       export wild:ui/widget@0.1.0;
+//   }
+//
+// The contract is intentionally small: the host does not enforce a particular
+// UI framework. The returned HTML is sandboxed inside the card by the carrier
+// (V1: injected as innerHTML; later: shadow DOM or iframe).
+//
+// Host-side bindgen world lives in `crates/runtime/wild-host/wit/wild/widget/host-world.wit`
+// so the canonical package stays interface-only and can be imported by both guest
+// and host worlds without duplicate-world collisions.
+
+package wild:ui@0.1.0;
+
+interface widget {
+    /// Metadata the host uses to advertise the widget in authoring surfaces.
+    record widget-meta {
+        /// Stable widget kind identifier. Lower-kebab-case, globally unique
+        /// across every loaded widget plugin. Matches the `type` field an
+        /// operator writes in the app spec.
+        kind: string,
+
+        /// Human-readable label shown in authoring UI.
+        label: string,
+
+        /// SemVer of the widget implementation.
+        version: string,
+
+        /// JSON Schema for the `config` blob the spec carries. The host does
+        /// not validate against it at runtime (the widget parses its own config),
+        /// but authoring tools use it to offer completion and validation.
+        config-schema: string,
+    }
+
+    /// Failure surface a widget can return when it cannot render.
+    variant widget-error {
+        /// The spec's `config` is malformed or missing required fields.
+        invalid-config(string),
+        /// The supplied data shape does not match what the widget expects.
+        invalid-data(string),
+        /// An internal failure in the widget; `message` is operator-facing.
+        render-failed(string),
+    }
+
+    /// Return this widget's metadata. Called once per loaded component at
+    /// registry-build time; must be deterministic.
+    describe: func() -> widget-meta;
+
+    /// Render one view. `view-json` is the serialized view spec (kind + config
+    /// + cross-cutting flags). `data-json` is the already-fetched, governed
+    /// read outcome (`Outcome::Ok` shape). The returned HTML fragment is placed
+    /// inside the card by the carrier.
+    render: func(view-json: string, data-json: string) -> result<string, widget-error>;
+}
