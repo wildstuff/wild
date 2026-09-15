@@ -1,0 +1,13 @@
+# Intake mapping for the starter seed list. Explicit (not `intake: auto`)
+# because `crawl_queue.status` is a closed ENUM field — the auto identity
+# map covers only scalar column types, so the enum column is mapped as
+# `text` here and the store's enum validation checks the value
+# (`pending`) at the write seam.
+target_type: crawl_queue
+key: [url]
+columns: [url, status, depth, source]
+mapping:
+  - { column: url, field: url, ty: text }
+  - { column: status, field: status, ty: text }
+  - { column: depth, field: depth, ty: int }
+  - { column: source, field: source, ty: text }

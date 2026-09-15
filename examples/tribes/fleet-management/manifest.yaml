@@ -1,0 +1,26 @@
+# Minimal GENESIS fixture for the selection-eval walk
+# `a-genesis-interview-proposes-one-round` — deliberately NOT a worked example:
+# a fleet-management tribe carrying exactly ONE type, so the eval runner's
+# readiness probe (one non-system type) passes after boot and the setup
+# interview starts from an almost-empty world. Everything the interview is
+# expected to PROPOSE (Halter, Fahrzeuge, Buchungen, Werkstatttermine, TÜV,
+# the app) is deliberately absent — a fixture that already carried any of it
+# would pre-satisfy the world the walk measures.
+#
+# Schema: `crates/runtime/wild-tribe-ops/src/bundle.rs::BundleManifest`.
+schema_version: "1"
+
+authoring_method: ddd
+
+name: fleet-management
+
+description: >
+  A fleet-management domain being set up — deliberately near-empty. A single
+  note table as its seed, so the setup interview builds the model together
+  with the operator instead of finding a finished world.
+
+parent_tribe: root
+
+# Chief-only: the default chief deploys with no worker refs — this fixture
+# exists to be interviewed, not to run intake.
+workers: []
