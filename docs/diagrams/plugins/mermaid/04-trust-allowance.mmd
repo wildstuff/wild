@@ -1,0 +1,6 @@
+flowchart TB
+    Verified["verified<br/>signed by Wild's own key"] --> AllCaps["every capability<br/>it declares"]
+    Community["community<br/>signed by a publisher<br/>you trust"] --> MostCaps["reads open ·<br/>writes and dispatch blocked"]
+    Unknown["unknown<br/>unsigned or stranger's key"] --> MinCaps["blob reads +<br/>bus consume only"]
+    MostCaps -. "wild plugin grant<br/>widens per plugin" .-> AllCaps
+    MinCaps -. "wild plugin grant<br/>widens per plugin" .-> MostCaps

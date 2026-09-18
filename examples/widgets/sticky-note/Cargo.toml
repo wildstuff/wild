@@ -1,0 +1,58 @@
+# Teaching sample for `wild:ui/widget@0.1.0` (ADR-0173) — the smallest
+# complete Tier-2 WIDGET plugin. Renders a sticky-note card (title +
+# text from the view's `config`) as a new view kind for the `wild-view`
+# app renderer. Deterministic, no host imports: `render()` is a pure
+# JSON-in → HTML-fragment-out function, so the full contract can be
+# exercised on any machine with `cargo test` alone.
+#
+# Standalone — explicitly NOT a member of the wild workspace (the
+# wasm32-wasip2 target would otherwise pull host-target deps into the
+# embedded host's build). Empty `[workspace]` table tells cargo this
+# manifest defines its own (single-member) workspace.
+
+[workspace]
+
+[package]
+name         = "sticky-note"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.97.0"
+license      = "Apache-2.0"
+repository   = "https://github.com/wildstuff/the-wild"
+description  = "Teaching sample Tier-2 widget plugin — renders a sticky-note card from view config (wild:ui/widget@0.1.0), deterministic, no host imports"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Same pin as the shipping Tier-2 plugins. The widget surface itself is
+# synchronous, but the shared bindgen runtime is built with the
+# `async-spawn` feature everywhere in this repo — keep the pin identical
+# so a reader can graduate to an async-importing world without churn.
+wit-bindgen = { version = "=0.58.0", features = ["async-spawn"] }
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+
+# Wasm components are single-threaded; no tokio.
+
+[package.metadata.component]
+package = "wildstuff:sticky-note"
+
+[package.metadata.component.target]
+path  = "wit"
+world = "sticky-note"
+
+# WIT-package deps for the world's include + export. Path deps straight
+# at the canonical text-WIT under `wit/<pkg>/`. The wit-bindgen macro
+# ALSO reads `wit/deps/<name>/` next to `wit/world.wit` (checked-in
+# symlinks resolving to the same files), so both surfaces have to
+# agree — see ./wit/deps/.
+[package.metadata.component.target.dependencies]
+"wild:plugin-meta" = { path = "../../../wit/plugin-meta/plugin-meta.wit" }
+"wild:ui"          = { path = "../../../wit/ui/ui.wit" }
+
+[profile.release]
+opt-level     = "z"
+lto           = true
+strip         = true
+codegen-units = 1

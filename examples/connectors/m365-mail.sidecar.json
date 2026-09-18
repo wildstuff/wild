@@ -1,0 +1,47 @@
+{
+  "slug": "m365-mail-connector",
+  "version": "0.1.0",
+  "source": {
+    "type": "oci",
+    "ref": "oci://ghcr.io/wildstuff/plugins/tools/m365-mail-connector:0.1.0",
+    "digest": "sha256:unknown"
+  },
+  "wasm_filename": "m365-mail-connector-0.1.0.wasm",
+  "trust": {
+    "tier": "community"
+  },
+  "provides": [
+    "wild:tool-provider/tools@0.4.0"
+  ],
+  "capability_bundles": [
+    "http.fetch",
+    "source.connector",
+    "scheme.m365-mail"
+  ],
+  "source_connector": {
+    "setup": "oauth",
+    "structure": "schema_declaring",
+    "binding": "fetched",
+    "scope": "none"
+  },
+  "config_keys": [],
+  "secret_aliases": [
+    "m365-mail-client-secret"
+  ],
+  "auth_bindings": [
+    {
+      "name": "m365-mail",
+      "description": "Microsoft Graph mail OAuth access (token injected as bearer). The guided config-writer (`configure_oauth_binding`) writes the system/oauth.yaml + system/egress.yaml rows from this template (client_credentials for app-only; delegated uses `wild oauth login`).",
+      "hosts": ["graph.microsoft.com"],
+      "inject": "bearer",
+      "oauth": {
+        "grant": "client_credentials",
+        "token_url_template": "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+        "scopes": ["https://graph.microsoft.com/.default"],
+        "token_endpoint_auth": "client_secret_post",
+        "client_secret_ref_default": "m365-mail-client-secret"
+      }
+    }
+  ],
+  "default_pool_size": 2
+}

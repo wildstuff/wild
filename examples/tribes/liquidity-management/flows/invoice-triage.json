@@ -1,0 +1,30 @@
+{
+  "tribe": "acme-liquidity",
+  "def": {
+    "slug": "invoice-triage",
+    "description": "When an invoice arrives: determine urgency and, depending on the situation, dun, remind or file it — then record it as processed.",
+    "entry": { "kind": "manual", "accepts": "invoice" },
+    "stages": [
+      { "id": "ingest",    "archetype": "sink-data",  "mechanism": "csv-decode" },
+      { "id": "normalize", "archetype": "transform",  "mechanism": "normalize-invoice", "execution": "deterministic" },
+      { "id": "assess",    "archetype": "transform",  "mechanism": "assess-urgency", "execution": "agentic", "emits": "invoice", "port": "exclusive" },
+      { "id": "chase",     "archetype": "transform",  "mechanism": "dunning-notifier", "execution": "agentic" },
+      { "id": "escalate",  "archetype": "transform",  "mechanism": "telegram-send", "execution": "agentic" },
+      { "id": "remind",    "archetype": "transform",  "mechanism": "friendly-reminder", "execution": "agentic" },
+      { "id": "file",      "archetype": "transform",  "mechanism": "file-invoice", "execution": "deterministic" },
+      { "id": "record",    "archetype": "sink-data",  "mechanism": "atlas_put_record" }
+    ],
+    "edges": [
+      { "from": "ingest",    "to": "normalize" },
+      { "from": "normalize", "to": "assess" },
+      { "from": "assess",    "to": "chase",  "when": "urgency == 'overdue'" },
+      { "from": "assess",    "to": "remind", "when": "urgency == 'due_soon'" },
+      { "from": "assess",    "to": "file",   "default": true },
+      { "from": "chase",     "to": "escalate" },
+      { "from": "escalate",  "to": "record" },
+      { "from": "remind",    "to": "record" },
+      { "from": "file",      "to": "record" },
+      { "from": "record",    "to": "terminal:return(triaged)" }
+    ]
+  }
+}

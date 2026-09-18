@@ -1,0 +1,332 @@
+// `wild:tool-provider` — Tier-2 tool-pack capability surface.
+//
+// Plugin Concept P3 (W2). A tool-provider plugin exports a list of
+// LLM-callable tools (math evaluation, datetime arithmetic, unit
+// conversion, …) plus an `invoke` entry point that dispatches a
+// JSON-shaped argument bundle to the named tool. The host
+// `ToolProviderRegistry` aggregates `list-tools()` across every
+// loaded tool-provider plugin into a single flat catalog.
+//
+// Who reaches that catalog — it is NOT every agent (see
+// `docs/plugin-developer-guide.md` § "Who invokes a provider tool"):
+//   - WORKERS via `wild:tools/invoke` — the generic LLM tool-caller.
+//   - the ELDER via the tool's SKILL — ship `list-skill-mds()` and the
+//     host fronts the tool through the `MergedSkillRegistry`.
+//   - the CHIEF only via `wild:tool-routing/invoke` for deterministic
+//     ADR-0039 schedule recipes; it is NOT a generic tool-caller.
+//   - operators directly via `wild tool invoke <name> <args-json>`
+//     (the LLM-free smoke-test surface).
+//
+// Vocabulary — a *tool* is not a *tool-provider* (1:N, by design):
+//
+//   - A **tool** is ONE named verb: a `tool-spec` with its own
+//     `json-schema` (and, per ADR-0055, its own input/output signature).
+//     `math-eval` and `http-fetch` are tools.
+//   - A **tool-provider** is ONE component that exposes one-OR-MANY tools
+//     via `list-tools()` and dispatches them by `name` through `invoke`.
+//     `math-tools` provides THREE (`math-eval` / `datetime-arith` /
+//     `unit-convert`); `http-fetcher` provides TWO.
+//
+// The plural lives in the contents, not the name — which is why this
+// contract is `tool-provider`, not `tool`: a component is a pack of
+// tools, never a single one. The consumer-side `wild:tools` is plural
+// for the same reason — a caller goes through the aggregated catalog of
+// every provider, not one.
+//
+// Composition (provider-flavor):
+//
+//   world tool-provider-plugin {
+//       include wild:plugin-meta/plugin-base@0.3.0;
+//       import wild:secrets/store@0.1.0;
+//       import wasi:http/outgoing-handler@0.2.0;
+//       import wild:blobs/store@0.4.0;
+//       export wild:tool-provider/tools@0.4.0;
+//   }
+//
+// `math-tools` is the reference implementation: pure-eval, no
+// imports beyond `plugin-meta`. A future `web-search-tools` would
+// bind `wasi:http/outgoing-handler`; an `s3-tools` would bind
+// `wild:blobs/store` + `wild:secrets/store`. Whether each import
+// is granted depends on the plugin's trust tier (D3 Stage-2 gate).
+//
+// ADR-0059 — a component needing an API key / token imports
+// `wild:secrets/store@0.1.0` and reads it at use-time via
+// `get(alias)` (never a literal, never a config key). The blueprint
+// `## Secrets` block declares the alias (SCREAMING_SNAKE); the host
+// maps it to the operator's stored secret. Wright (the forge coder)
+// is instructed to generate exactly this; see `prompts/chief-default/
+// wright.md` § Secrets.
+//
+// JSON over the WIT boundary, deliberately:
+//
+//   - `tool-spec.json-schema` is a JSON Schema string. The host
+//     ships it through to the LLM verbatim so adding a new tool
+//     doesn't require a WIT bump every time the schema changes.
+//   - `invoke(name, args-json)` takes JSON-string args + returns
+//     a JSON-string result. Same logic — the LLM produces JSON,
+//     consumes JSON, and a per-tool typed Wasm record would force
+//     a WIT redeploy on every tool addition.
+//   - `tool-error` is a typed variant so the host can distinguish
+//     "the tool doesn't exist" (route bug) from "the args don't
+//     match the schema" (LLM bug) from "the tool ran and crashed"
+//     (plugin bug). The `wild:ai/chat` tool-result loop can choose
+//     to recover or surface the failure to the LLM accordingly.
+
+// @0.3.0 (ADR-0100): `invoke` became an `async func` so a tool can drain a
+// component-model-async `stream<u8>` import (e.g. `wild:host-source/reader`)
+// while decoding a large source in place. The host drives every `invoke`
+// under `run_concurrent`; the sync `list-tools`/`list-skill-mds` are
+// unchanged. Requires a wit-bindgen 0.58 guest.
+//
+// @0.4.0 (ADR-0116 D1): `tool-error` gained the `fault(fault-detail)`
+// case — a failure whose CLASS the tool knows (401 → `auth`, 429 →
+// `rate-limited`) travels typed instead of as prose inside
+// `execution-failed`, so the host waist can route on it. Additive for
+// plugin code (the old cases still compile + dispatch), but the
+// tool-error member set changed, so the minor bumps (house rule; the
+// package sits in the wit-internal.lock publish allow-list).
+package wild:tool-provider@0.4.0;
+
+interface tools {
+    /// One tool the plugin makes available. The host renders these
+    /// into the `tools: [...]` array on every `wild:ai/chat`
+    /// invocation, so name + description + json-schema are LLM-
+    /// facing strings.
+    record tool-spec {
+        /// Stable tool name. Lower-kebab-case by convention.
+        /// Globally unique across every loaded tool-provider —
+        /// the registry's conflict policy (sidecar `pool_priority`
+        /// ascending, first-wins) decides which plugin owns the
+        /// name when two declare it. Examples: `"math-eval"`,
+        /// `"datetime-arith"`, `"unit-convert"`.
+        name: string,
+
+        /// Human-readable description shown to the LLM as the
+        /// tool's `description` field. Should explain when to use
+        /// the tool, NOT how — argument shape is the json-schema's
+        /// job.
+        description: string,
+
+        /// JSON Schema for the `args-json` payload. The host
+        /// passes this verbatim to the LLM. Keep it minimal —
+        /// `{"type":"object","properties":{"expr":{"type":"string"}},
+        /// "required":["expr"]}` is plenty for a math-eval tool.
+        json-schema: string,
+    }
+
+    /// Successful tool invocation result. `json-output` is the
+    /// canonical-JSON the LLM consumes verbatim through the
+    /// `tool-result` content-block in `wild:ai/chat`.
+    record tool-result {
+        /// JSON the LLM sees. Plain strings are valid JSON; numeric
+        /// outputs are JSON numbers. Whatever shape, the consumer
+        /// (LLM tool-loop) decides how to render it.
+        json-output: string,
+
+        /// Optional cost-units the host can sum across a session
+        /// for budget tracking. Tool authors emit `Some(n)` when a
+        /// tool has a meaningful cost (web-search API call, S3
+        /// GET) and `None` for free pure-eval tools.
+        cost-units: option<u64>,
+    }
+
+    /// The failure CLASS of a `fault` (ADR-0116 D1) — closed and
+    /// enumerable so the host waist can route on it instead of
+    /// parsing prose. A tool that cannot tell its class keeps
+    /// emitting `execution-failed` (the host maps it to
+    /// `unknown`); teaching a tool its class is an on-touch
+    /// migration, never a requirement.
+    ///
+    /// - `auth`         — the remote rejected the credential
+    ///                    (missing / wrong / expired / revoked;
+    ///                    HTTP 401/403). Operator-actionable.
+    /// - `config`       — the component's own configuration is
+    ///                    wrong (bad endpoint, missing mapping).
+    /// - `unreachable`  — the remote can't be reached or answered
+    ///                    with a non-auth failure (DNS, connect,
+    ///                    5xx).
+    /// - `rate-limited` — throttled (HTTP 429); a backoff
+    ///                    policy's lane.
+    /// - `transient`    — expected to pass on its own; retry lane.
+    /// - `user-error`   — the CALLER supplied bad input; stays
+    ///                    with the caller, never routed out.
+    /// - `unknown`      — the component can't classify it.
+    enum fault-class {
+        auth,
+        config,
+        unreachable,
+        rate-limited,
+        transient,
+        user-error,
+        unknown,
+    }
+
+    /// One classified fault — the typed alternative to prose in
+    /// `execution-failed`. `message` stays the human detail; the
+    /// class is what routes (ADR-0116 D4/D5).
+    record fault-detail {
+        class: fault-class,
+        message: string,
+    }
+
+    /// Typed failure modes. The host's tool-loop decides how to
+    /// surface each one to the LLM:
+    ///
+    /// - `unknown-tool`     — registry routing bug; never reaches
+    ///                        the plugin in practice (registry has
+    ///                        already resolved the name). Defensive.
+    /// - `invalid-args`     — args-json doesn't match the schema.
+    ///                        Surfaced to the LLM as a tool-result
+    ///                        with `is_error: true` so it can retry
+    ///                        with corrected args.
+    /// - `execution-failed` — the tool ran but its work failed
+    ///                        (network down, division-by-zero in a
+    ///                        math eval, missing secret) and the
+    ///                        tool can't say which class — prose
+    ///                        only. Same as invalid-args from the
+    ///                        LLM's POV.
+    /// - `timeout`          — host-enforced timeout on the WIT call.
+    ///                        Surfaced as `is_error: true`.
+    /// - `fault`            — the tool ran, failed, AND knows the
+    ///                        failure class (ADR-0116 D1). Same as
+    ///                        execution-failed from the LLM's POV;
+    ///                        the class exists for the host-side
+    ///                        fault net, not the model.
+    variant tool-error {
+        unknown-tool(string),
+        invalid-args(string),
+        execution-failed(string),
+        timeout,
+        fault(fault-detail),
+    }
+
+    /// One Skill MD bundled with the plugin. The host registers
+    /// these into the per-tribe `skills` table at component-load
+    /// time so the rest of the runtime can resolve them through
+    /// the same Skill registry it uses for prompts/skills, MCP
+    /// adapters and forge output (see `docs/skill-vs-tool.md`).
+    ///
+    /// One MD per Tool the plugin exports is the canonical shape:
+    /// it lets a Tool's worked examples + role hints + version
+    /// live structurally next to source instead of being smuggled
+    /// through `tool-spec.description`. A plugin that ships no
+    /// MDs at all is fine — the registry treats `list-skill-mds`
+    /// as a hint, never a requirement.
+    record skill-md {
+        /// Stable Skill slug. Lower-kebab-case, globally unique
+        /// across the registry. By convention identical to the
+        /// Tool name when the Skill wraps a single Tool — but
+        /// this is not enforced (composite Skills wrap several
+        /// Tools or none). The host registers
+        /// `<slug>` into the `skills` table verbatim; collisions
+        /// resolve through the registry's per-source policy.
+        slug: string,
+
+        /// Markdown body, including YAML frontmatter. The host
+        /// parses the frontmatter (`SkillSpec` shape — slug,
+        /// version, source, roles, examples) and stores the
+        /// body verbatim. Plugins should `include_str!` this
+        /// from a sibling `.md` file so `cargo component build`
+        /// bundles it into the Wasm component.
+        body: string,
+    }
+
+    /// Return the catalog this plugin exposes. Called once at host
+    /// boot per pooled instance to populate the registry. The
+    /// returned list MUST be deterministic across calls within one
+    /// plugin lifecycle — the host caches the boot-time catalog
+    /// and uses it for routing dispatch.
+    list-tools: func() -> list<tool-spec>;
+
+    /// Return Skill MDs bundled with the plugin. Called once at
+    /// component-load time alongside `list-tools()`; the host
+    /// registers each MD into the per-tribe Skill registry.
+    /// Plugins MUST return an empty list if they ship no MDs —
+    /// callers do not synthesise Skills from Tool specs alone.
+    /// Like `list-tools()`, the result MUST be deterministic
+    /// across calls within one plugin lifecycle.
+    list-skill-mds: func() -> list<skill-md>;
+
+    /// Dispatch a tool call. `name` is one of the names returned
+    /// by `list-tools`; `args-json` is the LLM-emitted argument
+    /// bundle. The plugin parses `args-json` against its own
+    /// schema for `name`, runs the tool, and returns either a
+    /// `tool-result` or a typed `tool-error`.
+    ///
+    /// `async func` (ADR-0100): the host drives it under `run_concurrent`,
+    /// so a tool may `.await` a component-model-async import — draining a
+    /// `wild:host-source/reader` / `wild:files/reader` `stream<u8>` to decode
+    /// a large source in place instead of buying the whole `list<u8>` by
+    /// value. A tool that awaits nothing (the common case) is unaffected —
+    /// the async binding just resolves immediately.
+    invoke: async func(name: string, args-json: string) -> result<tool-result, tool-error>;
+}
+
+// ADR-0100 D4 — native streaming decode. Where a format adapter's
+// `invoke("<x>-decode", {range:{offset,limit}})` returns ONE row-range as JSON
+// and the intake runner poll-loops it (re-parsing the whole source on every
+// chunk — O(files x rows^2)), `decode-stream` returns ALL rows as a native
+// `stream<row>` the consumer drains once: no poll loop, no re-parse.
+//
+// `async func`: the host drives it under `run_concurrent`; the guest produces
+// via `wit_stream::new()` + `spawn_local(write_all)` (needs wit-bindgen
+// `async-spawn`). ADDITIVE on the unpublished `@0.3.0` (no bump — like
+// `wild:host-source/reader` at `@0.1.0`); a format adapter opts in by exporting
+// `decoder` in its world. Only reachable through the host relay
+// (`wild:tools/invoke-stream`), never the LLM tool catalog.
+interface decoder {
+    /// One decoded row — canonical-string cells, the same shape as the poll
+    /// path's `rows[]` entries. A named `record` so the stream element is typed.
+    record row {
+        cells: list<string>,
+    }
+
+    /// Stream every decoded row for tool `name` with `args-json` (the same
+    /// decode args as `invoke`, minus `range` — the stream replaces the cursor).
+    /// On the error path the string carries the underlying tool-error detail.
+    decode-stream: async func(name: string, args-json: string) -> result<stream<row>, string>;
+}
+
+// World template (documented, not parsed):
+//
+// Tool-pack authors define their own world based on what the pack
+// needs to import. The package intentionally exposes only the
+// `tools` interface so adding a new pack with different imports
+// (web-search needing wasi:http, s3 needing wild:blobs +
+// wild:secrets) doesn't require a WIT bump.
+//
+// Pure-eval pack (math-tools, the W2 reference):
+//
+//   world math-tools {
+//       include wild:plugin-meta/plugin-base@0.3.0;
+//       export wild:tool-provider/tools@0.4.0;
+//   }
+//
+// HTTP-binding pack (web-search-tools, future):
+//
+//   world web-search-tools {
+//       include wild:plugin-meta/plugin-base@0.3.0;
+//       import wasi:http/outgoing-handler@0.2.0;
+//       import wild:secrets/store@0.1.0;
+//       export wild:tool-provider/tools@0.4.0;
+//   }
+//
+// Each import the world declares lands in the plugin manifest's
+// `requires: []` list and is checked by the D3 Stage-2 trust gate
+// at load time before the plugin is admitted.
+
+// The host side of the contract — the deps-free worlds the linker
+// `bindgen!`s (`crates/runtime/wild-host/src/shims/tool_provider*`).
+// A tool-provider guest declares its OWN world (`include plugin-base;
+// export tools;`); these host worlds carry no `plugin-base`/`secrets`/
+// `http` imports, so they resolve inside the host WIT tree without the
+// foreign packages. The host copy under
+// `crates/runtime/wild-host/wit/wild/` is GENERATED from this file
+// (`xtask wit-host-write`): guest worlds are dropped, these host worlds
+// are kept.
+world tool-provider-host {
+    export tools;
+}
+world tool-provider-decoder-host {
+    export decoder;
+}

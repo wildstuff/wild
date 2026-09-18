@@ -1,0 +1,16 @@
+flowchart TD
+    You(["You"]) -->|"chat via MCP"| Elder["🧙 Elder<br/><i>one per install</i>"]
+    Elder -->|"spawns & operates"| pw
+    Elder -->|"spawns & operates"| si
+    subgraph pw["Tribe: price-watch"]
+        C1["Chief"] --> W1["Crawler"] & W2["Analyst"] & W3["Writer"]
+        C1 -.->|"forges tools"| F1["🔥 Forge"]
+        C1 -.->|"reads/writes"| D1[("Ontology<br/>+ Memory")]
+    end
+    subgraph si["Tribe: supplier-intel"]
+        C2["Chief"] --> W4["…workers"]
+        C2 -.-> F2["🔥 Forge"]
+        C2 -.-> D2[("Ontology<br/>+ Memory")]
+    end
+    D1 -.->|"lessons mirror up"| KC[("Fleet commons<br/>root lake")]
+    D2 -.->|"lessons mirror up"| KC

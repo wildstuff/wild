@@ -1,0 +1,4 @@
+# Auto-intake: columns map 1:1 onto the `viewing` type's fields.
+target_type: viewing
+key: [viewing_id]
+columns: [viewing_id, date, time_slot, phone, vehicle_id, status, notes]
