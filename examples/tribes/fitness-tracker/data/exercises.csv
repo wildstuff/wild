@@ -1,0 +1,26 @@
+exercise_id,name,kcal_per_min,met,category,min_age,max_age,gender_suitability,level,source_url
+running-10kmh,Running (10 km/h),11.7,9.8,cardio,,,any,intermediate,https://pacompendium.com
+cycling-moderate,Cycling (moderate),8.0,7.5,cardio,,,any,intermediate,https://pacompendium.com
+swimming,Swimming (freestyle),9.8,8.3,cardio,,,any,intermediate,https://pacompendium.com
+walking-brisk,Walking (brisk 6 km/h),5.0,4.3,daily,,,any,beginner,https://pacompendium.com
+strength-training,Strength training,6.0,5.0,strength,,,any,intermediate,https://pacompendium.com
+yoga,Yoga,3.0,2.5,flexibility,,,any,beginner,https://pacompendium.com
+hiit,HIIT,12.5,10.0,cardio,,,any,advanced,https://pacompendium.com
+rowing,Rowing (moderate),8.5,7.0,cardio,,,any,intermediate,https://pacompendium.com
+elliptical,Elliptical trainer,7.0,5.8,cardio,,,any,beginner,https://pacompendium.com
+jump-rope,Jump rope,12.0,11.0,cardio,,,any,advanced,https://pacompendium.com
+hiking,Hiking,7.0,6.0,sport,,,any,beginner,https://pacompendium.com
+pilates,Pilates,4.0,3.0,flexibility,,,any,beginner,https://pacompendium.com
+soccer,Soccer,9.0,7.0,sport,,,any,intermediate,https://pacompendium.com
+tennis,Tennis (singles),8.0,7.3,sport,,,any,intermediate,https://pacompendium.com
+stair-climbing,Stair climbing,9.0,8.0,cardio,,,any,intermediate,https://pacompendium.com
+boxing-spar,Boxing (sparring),9.4,7.8,cardio,,,any,advanced,https://pacompendium.com
+basketball,Basketball,7.8,6.5,sport,,,any,intermediate,https://pacompendium.com
+dancing-aerobic,Dancing (aerobic),8.8,7.3,cardio,,,any,beginner,https://pacompendium.com
+weightlifting-vigorous,Weightlifting (vigorous),7.2,6.0,strength,,,any,advanced,https://pacompendium.com
+rock-climbing,Rock climbing,9.6,8.0,sport,,,any,advanced,https://pacompendium.com
+badminton,Badminton,6.6,5.5,sport,,,any,beginner,https://pacompendium.com
+kayaking,Kayaking,6.0,5.0,sport,,,any,intermediate,https://pacompendium.com
+circuit-training,Circuit training,9.6,8.0,strength,,,any,intermediate,https://pacompendium.com
+mountain-biking,Mountain biking,10.0,8.5,cardio,,,any,advanced,https://pacompendium.com
+skipping-moderate,Skipping (moderate),9.8,8.8,cardio,,,any,intermediate,https://pacompendium.com

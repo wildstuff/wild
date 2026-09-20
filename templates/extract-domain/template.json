@@ -1,0 +1,18 @@
+{
+  "name": "extract-domain",
+  "version": "0.1.4",
+  "tools": [
+    "extract_domain"
+  ],
+  "flavor": "tool-provider",
+  "wit_baseline": "wild:tool-provider@0.4.0",
+  "artifact": {
+    "digest": "sha256:0027d30b155a77eca63574661918c632f62c02df9a2149c92ac8b57a8aa15fd2",
+    "built_in": {
+      "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+      "target": "wasm32-wasip2",
+      "toolchain_reference": "1.97.0-26c2e7777c64-nt0.9.143",
+      "toolchain_digest": "a73899ba7a7c1d000f952016ea362414bd2fab75dfbecb3a855c61cd6df5c695"
+    }
+  }
+}

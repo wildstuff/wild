@@ -1,0 +1,6 @@
+# Auto-intake: columns map 1:1 onto `food_log`. `days_ago` is a read-time
+# derived field — not a column. Each entry's `food_id` must resolve a real
+# `food` (the ENFORCED `eats` edge); the loader ingests `food` before `food_log`.
+target_type: food_log
+key: [log_id]
+columns: [log_id, date, food_id, meal, grams, kcal, notes]

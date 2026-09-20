@@ -1,0 +1,22 @@
+// `echo-llm` — deterministic teaching adapter for the Tier-2
+// LLM-adapter contract.
+//
+// Composes `wild:llm-adapter/llm-adapter-streaming-plugin@0.3.0`
+// verbatim — the same world the shipping adapters (`openai`,
+// `openrouter`, `anthropic-cli`) build on. The include inherits:
+//
+//   - `wild:plugin-meta/plugin-base@0.3.0` — the meta lifecycle
+//     (`manifest` / `init` / `shutdown`) every Tier-2 plugin exports.
+//   - `import wild:secrets/store@0.1.0` and
+//     `import wasi:http/outgoing-handler@0.2.0` — the typical
+//     LLM-adapter imports. This sample calls NEITHER (no network,
+//     no secrets); wit-bindgen tree-shakes uncalled imports out of
+//     the built component, so the binary imports nothing.
+//   - `export chat` + `export chat-stream` + `export chat-stream-native`
+//     — the buffered call, the poll-cursor stream (contract shape),
+//     and the native token stream the host actually drives.
+package wildstuff:echo-llm@0.1.0;
+
+world echo-llm {
+    include wild:llm-adapter/llm-adapter-streaming-plugin@0.3.0;
+}

@@ -1,0 +1,1590 @@
+// `wild:data` — event-sourced, actor-aware data membrane.
+//
+// The membrane is stable; the storage engine behind it is pluggable
+// (a backend registry, mirroring `wild:ai`'s ChatBackendRegistry). The
+// default engine materialises an append-only event log into SQLite.
+//
+// Event-sourcing invariant (host-enforced, see
+// `providers::storage::wild_data`):
+//   - A write APPENDS an event carrying a producer-side UUID. The UUID
+//     is the idempotency key (re-appending the same UUID is a no-op);
+//     the log position is the ordering key.
+//   - Current state is a PURE PROJECTION of the log, materialised into
+//     SQLite. There is no in-place update.
+//   - `as-of(T)` replays the log up to T (position-exclusive,
+//     timestamp-inclusive — see the `as-of` record), so a read at T is
+//     reproducible and uses the schema valid at T.
+//   - Schema migrations are themselves ontology-log events, gated
+//     through the `wild:decisions` trail.
+//
+// Scope: 8 interfaces — types · ontology · schema · store · query · graph
+//        · root-graph · intake.
+//   - `types` holds the shared records/enums (`type-def`, `record-out`,
+//     `as-of`, `data-error`, …); every other interface `use`s them.
+//   - `ontology` is the schema-READ surface (get/list/search type-defs).
+//   - `schema` is the schema-WRITE surface (pin-type + propose/apply
+//     migration) — split out from the shared records so a data
+//     reader/writer cannot reach schema-write through a transitive
+//     type-owner import (#965; see the `types`/`schema` doc-comments).
+//   - `store`/`query` carry the OLTP write + as-of read surfaces.
+//   - `graph` adds TYPED traversal over the ontology's relations: its
+//     edges are derived from each `relation`'s `via-field` binding, not
+//     written directly.
+//   - `root-graph` re-exposes the same traversal primitives forced to
+//     the ROOT tribe's self-model (fleet-wide law, ADR-0065 D15).
+//   - `intake` is the inbound document-intake govern seam: a workload
+//     producer submits finished candidate records; the host runs the
+//     generic, gated govern-core over them.
+// Deferred (no surface here yet): pluggable graph engines beyond the
+// default SQLite recursive-CTE (AGE / Kùzu are later backend-registry
+// entries), raw Cypher, weighted/shortest-path tuning, cross-tribe
+// traversal, eventual-consistency materialisation.
+
+package wild:data@0.10.0;
+
+/// Shared type-system records — the canonical-JSON shapes every other
+/// `wild:data` interface `use`s. They live in their OWN interface (not
+/// alongside the schema functions) for a security reason: `store` /
+/// `query` / `graph` `use types.{…}`, so the component model forces any
+/// data reader/writer to import the interface that owns these records.
+/// If the schema-WRITE `pin-type` shared that interface, every data
+/// workload would transitively reach it (the #965 hole). Keeping the
+/// records here — and the writes in `schema` — lets the import-allowlist
+/// admit `types` (+ `ontology` reads) while refusing `schema`.
+interface types {
+    /// Scalar shape of a field's value inside a record's canonical-JSON
+    /// payload. P0 keeps the projection columns generic (one JSON blob
+    /// per record); `field-type` documents intent + drives validation,
+    /// not per-type SQLite columns (those are deferred).
+    enum field-type {
+        text,
+        int,
+        float,
+        boolean,
+        bytes,
+        json,
+        // F8 — precision-carrying types. A `decimal` value is stored as an
+        // EXACT JSON string (e.g. "12450.00"), NEVER a JSON number, so it
+        // survives round-trips without f64 loss; sum it losslessly via
+        // `query.sum-exact`. A `date` value is an ISO `YYYY-MM-DD` string
+        // (day resolution; time + timezone deferred).
+        decimal,
+        date,
+        // Strang 44 — a dense embedding vector. The value is a JSON array
+        // of floats in the record's canonical JSON (`{"embedding":[0.1,…]}`),
+        // whose length MUST equal the field's `vector-dim`. Each `vector`
+        // field is intrinsically indexed into its own `vec0` (sqlite-vec)
+        // virtual table; `query.find-by-knn` searches it. wild:data only
+        // STORES + SEARCHES vectors — embeddings are produced by a consumer
+        // via `wild:ai/embed` and written as this field (embed=plugin,
+        // store+search=core).
+        vector,
+        // ADR-0065 D6.1 — first-class value-types for introspection. An
+        // `enum` value is a JSON string drawn from the field's closed
+        // `enum-values` set (REQUIRED + non-empty when `ty` is `enum`). A
+        // `reference` value is a JSON string carrying the target's `key`; it
+        // is the property-side projection of a declared link, so it MUST be
+        // backed by a `relation` whose `via-field` names this field (the
+        // link is the truth — an unbacked reference is rejected at pin).
+        // `describe` surfaces both so a renderer picks a select widget / a
+        // link affordance instead of a free-text box. `enum` is a reserved
+        // WIT keyword, so the case is escaped `%enum` (bindgen → `Enum`).
+        %enum,
+        reference,
+        // Geospatial + blob reference value types. A `geo-point` value is a
+        // GeoJSON Point object (`{"type":"Point","coordinates":[lon,lat]}`);
+        // a `geo-polygon` value is a GeoJSON Polygon object. A `blob-ref`
+        // value is a string handle pointing into the `wild:blobs` store.
+        geo-point,
+        geo-polygon,
+        blob-ref,
+    }
+
+    /// ADR-0165 D0 — field-level LLM privacy scope. `all` = any adapter may
+    /// receive the field; `on-prem-only` = only self-hosted/on-prem adapters;
+    /// `none` = no LLM/embed/rerank adapter may receive it. A meaning/policy
+    /// mark, NOT shape: excluded from the schema-hash so flipping it does not
+    /// migrate records.
+    enum llm-scope {
+        all,
+        on-prem-only,
+        none,
+    }
+
+    /// One field on a type-def.
+    record field {
+        name: string,
+        ty: field-type,
+        required: bool,
+        /// Dimension of a `vector` field — the fixed float-count `vec0`
+        /// declares per index. REQUIRED when `ty` is `vector` (a vec0 index
+        /// needs a fixed dimension); MUST be `none` for every other type.
+        /// `none` on a non-vector field keeps its canonical shape — and the
+        /// schema-hash — byte-identical to before this field existed.
+        vector-dim: option<u32>,
+        /// Closed value set of an `enum` field — the allowed string members.
+        /// REQUIRED (`some`, non-empty) when `ty` is `enum`; MUST be `none`
+        /// for every other type. `none` on a non-enum field keeps its
+        /// canonical shape — and the schema-hash — byte-identical to before
+        /// this field existed.
+        enum-values: option<list<string>>,
+        /// ADR-0075 D2 — the LEXICON's field description: one sentence of
+        /// natural-language meaning, surfaced to the chief through `describe`.
+        /// A LABEL, not shape: NEVER part of the schema-hash, so relabelling
+        /// re-pins at the same version. `none` = an undescribed field.
+        description: option<string>,
+        /// ADR-0075 P (Inc 3) — the shared property (concept) this field BINDS
+        /// to. The chief may bind a field to an OPERATOR-declared concept (it
+        /// cannot declare one — #965); the pin is REFUSED if the named concept
+        /// is undeclared or the field's shape breaches its contract. SHAPE (a
+        /// binding to the constitution): part of the schema-hash when `some`.
+        conforms-to: option<string>,
+        /// ADR-0075 D2/P — the DIRECTIONAL role this binding plays on its
+        /// `conforms-to` concept (e.g. `contains` / `burns`), so the chief can
+        /// FILL the role a derived balance view (D6) reads. SHAPE (it
+        /// parameterises a computation): part of the schema-hash when `some`.
+        /// Inert without `conforms-to`.
+        conforms-role: option<string>,
+        /// ADR-0082 Inc 1 — this field's per-FIELD write-authority. `none` =
+        /// INHERIT the type's `write-authority` (the default — every uniform type,
+        /// and every field declared before the per-field grain existed, inherits, so
+        /// the canonical shape is byte-identical); `some` declares an explicit
+        /// authority, which is what makes a type MIXED (mirror + authored fields
+        /// in one object — the `invoice` that needs no overlay clone). A
+        /// hash-free mark (like `description`): NEVER part of the schema-hash,
+        /// so an authority flip re-pins at the same version.
+        write-authority: option<field-write-authority>,
+        /// ADR-0082 Inc 2/4b — a fold/Behavior expression that DERIVES this
+        /// field at query time (e.g. `@now - invoice_date`). Hash-free
+        /// (Behavior, not Shape): an expression edit re-pins at the same
+        /// version and the projection refreshes. `none` = an ordinary stored
+        /// field.
+        derived-from: option<string>,
+        /// ADR-0082 Inc 3 — the field's render format hint (`money_eur`,
+        /// `percent`, `iso_date`). PRESENTATION, never shape — hash-free.
+        /// `none` = the raw value form.
+        format: option<string>,
+        /// ADR-0082 Inc 3 — the field's semantic taxonomy path-string
+        /// (`Finance/Receivables`). Hash-free; split on `/` for tree/filter
+        /// views. `none` = uncategorised.
+        category: option<string>,
+        /// ADR-0082 Inc 5 — the name of the declared `function-def` that
+        /// ENRICHES this field at ingest. Hash-free wiring; a rebind re-pins
+        /// at the same version. `none` = not enriched.
+        enriched-by: option<string>,
+        /// PR6 (enrich-output-mapping) — which KEY of the `enriched-by`
+        /// Function's result object fills THIS field. `none` ⇒ the field's own
+        /// name (the scalar / matching-name case). Set it to bind a
+        /// differently-named tool output onto this field (a geocoder emitting
+        /// `latitude`/`longitude` fills `lat`/`lon`). Hash-free wiring.
+        enrich-output: option<string>,
+        /// ADR-0082 (custom attributes) — operator-specific metadata on the field.
+        /// Hash-free (Meaning register): changes do not affect schema-hash or migration.
+        /// Empty = byte-identical to before this field.
+        metadata: list<metadata-entry>,
+        /// ADR-0165 D0 — this field's LLM privacy scope. `none` (the default)
+        /// reads as `all`, preserving byte-identical behaviour for every existing
+        /// field. Hash-free (policy, not shape): excluded from the schema-hash.
+        llm-scope: option<llm-scope>,
+    }
+
+    /// ADR-0082 Inc 1 / ADR-0158 — the per-FIELD write authority (it moves
+    /// from Type to Field). Mirrors `type-write-authority`'s variants at field grain,
+    /// plus `shared` for dual-authority fields: it decides which write-path may
+    /// set a field (authored `upsert` vs source `ingest`), drift-detection, and
+    /// re-computability.
+    enum field-write-authority {
+        authored,
+        source-mirror,
+        shared,
+        derived,
+    }
+
+    /// One key-value pair of custom metadata. WIT has no native map type;
+    /// a list of entries is the canonical representation.
+    record metadata-entry {
+        key: string,
+        value: string,
+    }
+
+    /// Cardinality of a typed [`relation`] — the controlled vocabulary that
+    /// replaced the former free-form `kind` string (the typed enum the
+    /// `relation` doc once promised "with the graph interface"). DESCRIPTIVE
+    /// metadata only: the `graph` engine derives edges from `via-field`
+    /// regardless of `kind`. A scalar `via-field` expresses the "to-one" side
+    /// (each source row carries ONE target key), so `many-to-one` is the
+    /// natural shape (many invoices → one creditor); `one-to-many` /
+    /// `many-to-many` are modelled from the other side / through a join
+    /// entity. `many-to-one` is the default a legacy/absent value maps to.
+    enum relation-kind {
+        one-to-one,
+        one-to-many,
+        many-to-one,
+        many-to-many,
+    }
+
+    /// A typed edge to another type. The relation shape is part of the
+    /// schema-hash. `via-field` + `enforce` add a record-level binding and
+    /// opt-in referential existence; the `graph` interface
+    /// sources its typed edges from this binding.
+    record relation {
+        name: string,
+        target-slug: string,
+        /// Relation cardinality — descriptive metadata (the graph engine
+        /// derives edges from `via-field` regardless).
+        kind: relation-kind,
+        /// Record field carrying the target's `key`. `none` = the
+        /// convention that the field name equals `name`. The binding
+        /// referential-existence checks against and graph-interface edges
+        /// will be sourced from.
+        via-field: option<string>,
+        /// When true, a write whose `via-field` references a missing
+        /// target `key` is rejected with `dangling-relation`. Default
+        /// false = the edge is only registered as a future graph-interface edge source, no
+        /// existence is enforced.
+        enforce: bool,
+        /// ADR-0075 D3 — the phrase read from the TARGET side ("trains" forward
+        /// ⇒ "trained-by" inverse), so a traversal narrates in either direction.
+        /// A LABEL, not shape: never part of the schema-hash. `none` = a
+        /// forward-only edge.
+        inverse-name: option<string>,
+        /// ADR-0075 D3 — the relation's natural-language meaning. A LABEL, not
+        /// shape. `none` = an undescribed edge.
+        description: option<string>,
+        /// ADR-0082 Inc 1 (Link Properties) — the relation's OWN fields: data ON
+        /// the edge (e.g. an `owes_us` relation carrying `amount_overdue` +
+        /// `since`). Empty (`[]`) = today's scalar relation — fully backward-
+        /// compatible. SHAPE: a non-empty set is part of the schema-hash, so a
+        /// reified relation bumps the version.
+        fields: list<field>,
+    }
+
+    /// Lifecycle of a pinned type.
+    enum type-status {
+        active,
+        deprecated,
+    }
+
+    /// Who may WRITE a type's records. Drives write-routing:
+    ///   - authored      — operator/agent truth; `store.upsert` only.
+    ///   - source-mirror — a mirror of an external source; `store.ingest`
+    ///                     only (privileged), and MUST declare `key`.
+    ///   - derived       — computed by a projection; not directly writable.
+    /// Per-field `shared` authority (ADR-0158) handles the authored-over-mirror
+    /// overlay at field grain; `type-write-authority` itself stays single-authority.
+    enum type-write-authority {
+        authored,
+        source-mirror,
+        derived,
+    }
+
+    /// ADR-0082 — how a record's business KEY is assigned on `store.upsert`.
+    /// `explicit` (the default when omitted) = the caller supplies the key.
+    /// `uuid` = the store MINTS a v4 UUID into the single key field when the
+    /// caller's key is empty (an append entity with no natural business key).
+    enum key-strategy {
+        explicit,
+        uuid,
+    }
+
+    /// Conflict policy for a [`normalize-def`] when one `key` maps to
+    /// DIVERGING `project` values (the functional dependency is violated).
+    /// `error` (the default the host applies) fails closed with a
+    /// deterministic conflict report — the ask-don't-hallucinate seam;
+    /// `first` deterministically keeps the first row.
+    enum conflict-policy {
+        error,
+        first,
+    }
+
+    /// One flat source of a [`normalize-def`], named by `slug`. Multiple
+    /// sources UNION + dedup on the key (the conformed entity).
+    record normalize-source {
+        slug: string,
+    }
+
+    /// A declarative Silver normalize — the medallion's Silver layer. A flat
+    /// Bronze source often encodes a hidden entity (a functional dependency
+    /// `key → project`: every row with the same `key` carries the same
+    /// attributes). This def LEADS that canonical entity out: the engine
+    /// reads the `project` columns from each `from` source, UNIONs them, and
+    /// deduplicates on `key` into one row per distinct key — recomputed,
+    /// versioned, graph-traversable. NO LLM in the compute path; the key
+    /// match is EXACT. Carried ONLY on a `derived` `type-def`. Where a view
+    /// (host-side only, not on this WIT record) AGGREGATES, a normalize
+    /// DISTINCTS.
+    record normalize-def {
+        %from: list<normalize-source>,
+        /// The FD determinant — becomes the derived type's logical key.
+        key: list<string>,
+        /// The FD-dependent attribute columns projected onto the entity.
+        project: list<string>,
+        on-conflict: conflict-policy,
+    }
+
+    /// The verdict of an `ontology.detect-normalize` probe: read-only FD
+    /// detection over the CURRENT source rows, the non-mutating basis for
+    /// PROPOSING a Silver split before pinning one. `clean` = the candidate
+    /// `key` cleanly determines `project` (safe to propose); else
+    /// `conflict-report` carries the fail-closed divergence report (same
+    /// key, diverging values) the proposer shows instead of guessing.
+    record fd-proposal {
+        clean: bool,
+        /// Distinct entity rows the split would yield. Meaningful only when
+        /// `clean`; `0` on a conflict.
+        distinct-keys: u32,
+        /// Source rows scanned across all sources — the sample the verdict
+        /// rests on (detection is advisory; the pinned normalize
+        /// re-validates fail-closed at read time).
+        rows-scanned: u32,
+        conflict-report: option<string>,
+    }
+
+    /// One field of a [`concept-info`] — the reuse-first view of a `field`:
+    /// its name, scalar type, and whether it is `sensitive` (whose values
+    /// the value-overlap match never reads). Structural, no values.
+    record concept-field {
+        name: string,
+        ty: field-type,
+        sensitive: bool,
+        /// ADR-0165 D0 — the field's LLM privacy scope, surfaced so reuse
+        /// proposals do not accidentally map a restricted field onto a public
+        /// path. `none` (the default) reads as `all`.
+        llm-scope: option<llm-scope>,
+    }
+
+    /// A CONCEPT — a pinned type seen through the reuse-first lens: its slug,
+    /// write authority, logical key, and fields. The "map" an onboarding check
+    /// consults BEFORE minting a new field, so a real-world entity already
+    /// modelled once (a counterparty as `kreditor`) is reused rather than
+    /// re-created in isolation under another role. The consult-the-map half
+    /// of the reuse-first check (Strang 50 §3d / Strang 36). Structural only —
+    /// no record values cross this surface.
+    record concept-info {
+        slug: string,
+        write-authority: type-write-authority,
+        key: list<string>,
+        fields: list<concept-field>,
+    }
+
+    /// One ranked reuse suggestion: an existing concept field a NEW field
+    /// resembles, scored by column-name similarity (`name-score`) and
+    /// value-overlap (`value-overlap`), combined into `score` (all in [0,1]).
+    /// PROPOSES reuse targets best-first and never decides (ask, don't
+    /// hallucinate): the Chief surfaces the ranking and asks the operator
+    /// "map onto `<concept>`?".
+    record concept-match {
+        concept-slug: string,
+        field-name: string,
+        name-score: f32,
+        value-overlap: f32,
+        score: f32,
+    }
+
+    /// ADR-0075 — a declared SHARED PROPERTY: the operator's canonical name for
+    /// a cross-cutting quantity (`calories`, `money`, `distance`) that a field
+    /// BINDS to via `conforms-to`, so one definition is reused across types and
+    /// a roled balance stays summable.
+    ///
+    /// Not to be confused with [`concept-info`] above, which is a pinned TYPE
+    /// seen through the reuse lens (the ADR-0065 D9 sense of "concept"). This
+    /// is the LEXICON entry — what `conforms-to` names.
+    ///
+    /// The read half of an asymmetry the WIT deliberately keeps: only the
+    /// operator/Elder DECLARES a shared property (#965 — never a guest
+    /// capability), and the chief BINDS to one. Until this existed the chief
+    /// had the binding half with no way to SEE what it could bind to, so it
+    /// bound only what the operator happened to name in the intent.
+    record shared-property {
+        /// The slug a field's `conforms-to` references (e.g. `calories`).
+        name: string,
+        /// The value-type every conforming field must carry. A field whose type
+        /// mismatches is REFUSED at pin — read this before proposing a binding.
+        ty: field-type,
+        /// The unit the concept is measured in (`kcal`, `EUR`). A LABEL, never
+        /// a conformance constraint — two units never refuse a pin.
+        unit: option<string>,
+        /// The agent-facing "what this property is".
+        description: option<string>,
+        /// Every conforming field is masked (GDPR). Consistency is the point:
+        /// a field cannot quietly drop the mask its concept requires.
+        sensitive: bool,
+    }
+
+    /// A pinned ontology type. `version` + `schema-hash` are assigned by
+    /// the host on `pin-type` / `apply-migration`; callers leave them at
+    /// (0, "") on pin and the host fills them.
+    record type-def {
+        slug: string,
+        version: u32,
+        /// SHA-256 over the canonical type-def (fields + relations + key
+        /// + write-authority + capability-tags + status). Half of an as-of
+        /// content-address.
+        schema-hash: string,
+        fields: list<field>,
+        relations: list<relation>,
+        owner-tribe: string,
+        status: type-status,
+        capability-tags: list<string>,
+        write-authority: type-write-authority,
+        /// Logical primary key — the field name(s) that identify a
+        /// record. `source-mirror` types MUST declare a non-empty key.
+        key: list<string>,
+        /// ADR-0082 — key-assignment strategy. `none` (omitted) = `explicit`
+        /// (the caller supplies the key); `uuid` mints a key on a keyless
+        /// `upsert`. Additive + optional so an existing guest that omits it
+        /// reads as `explicit`.
+        key-strategy: option<key-strategy>,
+        /// Opt-in write-validation policy (default false = exactly P0,
+        /// no field-level checking). When true, `store.upsert`/`ingest`
+        /// reject a value missing a required field, carrying a field
+        /// whose JSON shape mismatches its `field-type`, or carrying an
+        /// unknown top-level field. A WRITE policy, NOT part of the
+        /// schema-hash (like `version`): so it never perturbs the hash.
+        strict-validation: bool,
+        /// Declarative Silver normalize — present ONLY on a `derived` type
+        /// (and mutually exclusive with the host-side view). Set on the
+        /// autonomous `schema.pin-type` path when the onboarding Chief
+        /// declares a CONFIRMED FD split; `none` on every non-normalize
+        /// type. Its structure (`from` + `key` + `project` + `on-conflict`)
+        /// is part of the schema-hash, so a remodel bumps the version.
+        normalize: option<normalize-def>,
+        /// ADR-0075 D1 — the LEXICON's display face, all optional. A LABEL set,
+        /// not schema shape: NONE of these enter the schema-hash, so a guest
+        /// (chief) naming/describing a type re-pins at the same version.
+        ///   - `display-name` — the human/agent label ("Exercise" for `uebung`).
+        ///   - `plural`       — the plural display form, for list phrasing.
+        ///   - `description`  — one-paragraph meaning (the chief's grounding).
+        ///   - `title-key`    — the field that NAMES an instance; `none`
+        ///                      defaults to the first `key` on read.
+        display-name: option<string>,
+        plural: option<string>,
+        description: option<string>,
+        title-key: option<string>,
+        /// ADR-0082 Inc 3 — the visual lexicon presentation marks. `icon` is the
+        /// list-row glyph + type picker symbol; `color` tints chips/nodes.
+        /// PRESENTATION, never shape — hash-free. `none` = unstyled.
+        icon: option<string>,
+        color: option<string>,
+        /// ADR-0082 Inc 3 — the semantic taxonomy path-string (`Finance/Receivables`).
+        /// Hash-free; split on `/` for tree/filter views. `none` = uncategorised.
+        category: option<string>,
+        /// ADR-0083 (Customer Domain MCP) — a Meaning-register VISIBILITY mark:
+        /// `true` exposes this Object Type to customer principals through the
+        /// customer-facing Domain MCP surface. Default `false` — operator/Elder/
+        /// Chief/internal surfaces ignore it. Hash-free.
+        customer-visible: bool,
+        /// ADR-0082 Inc 6 — a grouped composite's declaration, carried as a
+        /// JSON-encoded `grouped-def` (`{ source, group_by, measures }`, where
+        /// each measure is `{ name, op, field?, filter }` and `filter` is the
+        /// structured `object-set` predicate AND). It rides the WIT boundary as
+        /// an OPAQUE JSON string rather than a typed record on purpose: the
+        /// measure WHERE is the full `object-set` filter algebra (incl. `in`
+        /// over a JSON value list), which has no flat WIT mirror — the blob
+        /// keeps the WIT surface small while letting a guest (chief / forged
+        /// worker) author a composite over the autonomous `pin-type` path,
+        /// exactly as operator-YAML / host-Rust already can. The host parses it
+        /// at the pin seam (malformed JSON → `schema-invalid`) and runs the SAME
+        /// `validate-grouped` fail-closed checks (no sensitive sum-field /
+        /// group-by) regardless of authoring path. Present ONLY on a `derived`
+        /// type; its structure IS part of the schema-hash (like `normalize`,
+        /// unlike the host-only `view`), so a remodel bumps the version.
+        grouped: option<string>,
+        /// ADR-0082 (custom attributes) — operator-specific metadata on the type.
+        /// Hash-free (Meaning register): changes do not affect schema-hash or migration.
+        /// Empty = byte-identical to before this field.
+        metadata: list<metadata-entry>,
+    }
+
+    /// Membrane-level error. The retryable/permanent split lives in the
+    /// (future) Tier-2 engine contract; collapsed to a message here.
+    variant data-error {
+        /// No such record / type / version.
+        not-found(string),
+        /// Write rejected by authority-routing (e.g. `upsert` on a
+        /// `source-mirror` type, or `ingest` on an `authored` type).
+        not-writable(string),
+        /// CAS failure — `expected-version` did not match current.
+        version-conflict(string),
+        /// Referenced type slug is not pinned.
+        unknown-type(string),
+        /// A `source-mirror` type was pinned/ingested without a `key`.
+        key-required(string),
+        /// An ingest arrived with no/empty source locator. Lineage is
+        /// non-optional (ADR-0065 §8): the membrane fails closed and writes
+        /// nothing rather than admit a record with no provenance.
+        source-required(string),
+        /// RBAC denied the call (only ever returned when rbac is on).
+        capability-denied(string),
+        /// type-def or delta failed validation.
+        schema-invalid(string),
+        /// An `enforce`d relation referenced a target `key` that does
+        /// not exist (referential existence, not graph traversal).
+        dangling-relation(string),
+        /// Engine/IO failure.
+        backend(string),
+    }
+
+    /// A point in the log to read at. Both unset = live head.
+    /// `position` wins when both are set.
+    record as-of {
+        /// EXCLUSIVE upper bound: the state formed by every event at a log
+        /// position strictly BELOW this one. So `position` = a write's own
+        /// `record-meta.log-position` is the state *before* that write, and
+        /// `log-position + 1` is the state that includes it.
+        ///
+        /// The convention is arbitrary; that every engine shares it is not
+        /// (ADR-0247 D8). "Up to T" reads both ways in English, and the
+        /// inclusive reading is off by exactly one event on every historical
+        /// report — which looks correct in a spot check. Pinned by the
+        /// conformance suite's `as_of_position_is_exclusive_of_the_named_event`.
+        position: option<u64>,
+        /// INCLUSIVE — events stamped at or before this instant. Note the
+        /// deliberate asymmetry with `position` above: a position is a
+        /// boundary BETWEEN events, an instant is a value events are
+        /// compared against. Reading `timestamp-ms` as exclusive silently
+        /// drops every event that landed on the millisecond asked for.
+        timestamp-ms: option<u64>,
+    }
+
+    /// A materialised record read back from the projection. Shared by the
+    /// `store` (live-head) and `query` (as-of) read surfaces — one shape,
+    /// so a record reads back identically whichever surface served it.
+    record record-out {
+        type-slug: string,
+        key: string,
+        value: list<u8>,
+        version: u64,
+    }
+
+    /// One source's lineage + drift status inside a `view-result` — the
+    /// captured-vs-current schema-hash comparison `query.compute-view`
+    /// resolves for each of a derived view's sources.
+    record lineage-entry {
+        source: string,
+        /// Schema-hash captured when the view was pinned.
+        pinned-hash: string,
+        /// The source type's schema-hash NOW.
+        current-hash: string,
+        /// `pinned-hash != current-hash` → the view is stale for this source.
+        drift: bool,
+    }
+
+    /// The computed result of a `derived` VIEW at one business `as-of`
+    /// date — the medallion's Gold tier, the analytical counterpart of the
+    /// raw `record-out` read. The ordered `measures` are EXACT-decimal
+    /// STRINGS (never f64), so monetary results cross the WIT boundary
+    /// losslessly (the same representation `query.sum-exact` returns);
+    /// `lineage`/`drift` report whether any source has drifted from its
+    /// captured schema-hash. Returned by `query.compute-view`.
+    record view-result {
+        /// The derived view's own type slug.
+        type-slug: string,
+        /// Business reference date the window is anchored at (ISO).
+        as-of: string,
+        /// Inclusive window bounds on the dimension (ISO dates).
+        window-from: string,
+        window-to: string,
+        window-days: u32,
+        /// Ordered `(name, exact-decimal-string)` measures, in the view's
+        /// declaration order.
+        measures: list<tuple<string, string>>,
+        /// Per-source lineage + drift status.
+        lineage: list<lineage-entry>,
+        /// True iff ANY source has drifted from its captured schema-hash.
+        drift: bool,
+    }
+}
+
+/// Schema-READ surface: read + search pinned ontology type-defs. Reads
+/// are side-effect-free and safe for any lake reader/writer, so this
+/// interface MAY be granted to workloads (unlike `schema`). The
+/// shared records it returns live in `types`.
+interface ontology {
+    use types.{type-def, data-error, fd-proposal, concept-info, concept-match, shared-property};
+    // ADR-0097 D1 — `list-functions` returns the schema interface's `function-def`
+    // (a Function is declared via `schema.declare-function`; this is its read twin).
+    use schema.{function-def};
+
+    /// Read a pinned type. `version` unset = latest.
+    get-type: func(slug: string, version: option<u32>) -> result<type-def, data-error>;
+
+    /// ADR-0070 — `describe(entity)` as a SINGLE JSON answer across the six
+    /// entity axes, so a guest (the standalone chief) reads the SAME complete
+    /// object model the operator MCP `atlas_describe` returns, without the
+    /// `atlas_*` tools entering the chief catalog (the #965 boundary). The
+    /// result is a JSON string (keeps the WIT lean and matches how the chief
+    /// already parses injected blocks) carrying:
+    ///   1. STRUCTURE — `schema` (fields + value-types) + `relations`;
+    ///   2. ACCESS — `access` (key · per-field index/vector · graph · object-sets · as-of);
+    ///   3. RIGHTS — `rights` (`required_groups`, `existence_sensitive`, per-field
+    ///      `sensitive`/`masked`), rendered with the CALLER's identity so the
+    ///      boundary it shows agrees with the read gate (descriptive, not the gate);
+    ///   4. ACTIONS — `actions` (entity-bound verbs, each with param schema, risk,
+    ///      `requires`/`requires_state`, payload footprint, and `readiness`
+    ///      `ready`/`pending` against the live registry);
+    ///   5. LINEAGE — `lineage` (write-authority · derived view/normalize sources · mirrored-from);
+    ///   6. LIFECYCLE — `lifecycle` (status · version · compat-epoch · strict-validation · aliases).
+    /// Runs in the CALLER's tribe scope; the shape read applies the SAME
+    /// `check_read` gate as a record read, so a caller never learns the shape —
+    /// or a field/action — of a type it may not read. Only domain-exposed
+    /// entities are describable.
+    describe-entity: func(type-slug: string) -> result<string, data-error>;
+
+    /// ADR-0084 — the PLUGIN-grain sibling of `describe-entity`: the declaration
+    /// view of a registered component (plugin), read from the ONE declaration
+    /// read-model (the `component_effects` self-model node — never a second
+    /// catalog). Returns the manifest declaration as JSON: effect-surface
+    /// (`effect_classes`/`external`), `version`/`config_keys`, the workload
+    /// `backed_by` behavior + the provider `backed_tools`, and `secret_aliases`
+    /// MASKED for a non-operator caller (the chief sees it null). The chief
+    /// reads this for reuse-vs-forge: `list_components` (deployment view) names
+    /// the candidates, `describe-plugin` (declaration view) shows what one IS +
+    /// NEEDS. `not-found` when the slug names no registered component.
+    describe-plugin: func(slug: string) -> result<string, data-error>;
+
+    /// ADR-0078 — the tribe System-Card as ONE Markdown string: purpose, core
+    /// types, their wiring (relations), derived views, capabilities and domain
+    /// language — the orientation the chief pulls at cycle start. The SAME card
+    /// the operator MCP `atlas_intro` returns, rendered by the ONE host
+    /// assembler (`render_for_tribe`), without the `atlas_*` tools entering the
+    /// chief catalog (the #965 boundary — one assembler, two doors). Runs in the
+    /// CALLER's OWN tribe scope (no `tribe` arg); the per-principal catalog gate
+    /// applies, so the card never names a type the caller may not read.
+    tribe-intro: func() -> result<string, data-error>;
+
+    /// List pinned types, optionally filtered to one owner-tribe.
+    list-types: func(owner-tribe: option<string>) -> result<list<type-def>, data-error>;
+
+    /// Find types carrying a given capability tag.
+    search-types: func(capability-tag: string) -> result<list<type-def>, data-error>;
+
+    /// CONCEPT-LOOKUP — list every pinned type as a reuse CONCEPT (slug +
+    /// write-authority + key + fields), optionally one owner-tribe. The structural
+    /// "map" the reuse-first onboarding check consults before minting a new
+    /// field, so a real-world entity already modelled once is reused rather
+    /// than re-created in isolation under another role. Side-effect-free.
+    list-concepts: func(owner-tribe: option<string>) -> result<list<concept-info>, data-error>;
+
+    /// ADR-0097 D1 — list the CALLER tribe's declared reusable [`function-def`]s
+    /// (root ∪ tribe), the read twin of `schema.declare-function`. So the chief
+    /// SEES the Functions it can reuse (`derived_from: @name`) before re-minting
+    /// one. Caller-scoped (no owner-tribe — a guest lists its own); side-effect-
+    /// free. Added while the package was unpublished past `@0.5.0`, so no
+    /// minor bump was needed (history: `docs/wit-versions.md`).
+    list-functions: func() -> result<list<function-def>, data-error>;
+
+    /// ADR-0075 — list the CALLER tribe's declared SHARED PROPERTIES (root ∪
+    /// tribe): the read twin of the operator-only `atlas_declare_concept`, and
+    /// the exact sibling of `list-functions` above ("so the chief SEES what it
+    /// can reuse before re-minting"). The chief BINDS a field to a concept
+    /// (`conforms-to` + `conforms-role`) but may never declare one (#965) — it
+    /// held the binding half with no way to see the lexicon, so it could only
+    /// bind what the operator happened to name. Caller-scoped; side-effect-free.
+    /// Added while the package was unpublished past `@0.5.0`, so no minor bump
+    /// was needed (history: `docs/wit-versions.md`).
+    list-shared-properties: func() -> result<list<shared-property>, data-error>;
+
+    /// FIELD-CONCEPT-MATCH — fuzzy-match a NEW field (its name + a sample of
+    /// its values) against every existing concept field, ranked best-first.
+    /// Column-name similarity + value-overlap (canonicalised, so spelling
+    /// variants count as the same value); a `sensitive` field matches on name
+    /// only (its values are never read). PROPOSES reuse targets, never
+    /// decides — the Chief surfaces the ranking and asks. Reads at live head.
+    match-field: func(field-name: string, sample-values: list<string>) -> result<list<concept-match>, data-error>;
+
+    /// Probe whether a candidate `key → project` split over the `from`
+    /// sources is a clean functional dependency — the read-only, NON-MUTATING
+    /// basis for proposing a Silver normalize without pinning one. The host
+    /// folds the CURRENT source rows through the SAME engine a pinned
+    /// normalize uses (fail-closed), so a clean probe and the later
+    /// `schema.pin-type` agree by construction. Writes nothing; a column
+    /// that isn't a field of a source is a hard `schema-invalid`. Reads at
+    /// live head (no as-of) — onboarding detects over freshly ingested
+    /// Bronze.
+    detect-normalize: func(%from: list<string>, key: list<string>, project: list<string>) -> result<fd-proposal, data-error>;
+
+    /// PR3 (enrich-output-mapping) — one output binding of an [`enrich-node`]:
+    /// the Function result KEY (`from-key`) mapped onto the record FIELD it
+    /// fills (`to-field`). Trivial (`from-key == to-field`) for a scalar
+    /// function; a rename (`latitude -> lat`) for a multi-output one whose
+    /// result keys differ from the entity's field names.
+    record enrich-output {
+        from-key: string,
+        to-field: string,
+    }
+
+    /// ADR-0082 Inc 5 / PR3 — one node of the intake ENRICH DAG: a Function that
+    /// READS `inputs` (mapped-record fields) and WRITES `outputs` (key->field
+    /// bindings). One node per distinct Function, so a multi-output function
+    /// (e.g. a geocoder) is invoked once and its result fanned out to its
+    /// bound fields.
+    /// ADR-0102 — one input of an [`enrich-node`]: the record `field` read,
+    /// passed to the function under `arg` (equal unless a rule renames via `as`).
+    record enrich-input {
+        field: string,
+        arg: string,
+    }
+
+    record enrich-node {
+        function-id: string,
+        inputs: list<enrich-input>,
+        outputs: list<enrich-output>,
+        /// ADR-0102 — optional per-record boolean guard; a false guard skips
+        /// the node for that record (the host returns an empty result object).
+        guard: option<string>,
+    }
+
+    /// ADR-0082 Inc 5 — the intake ENRICH plan for `target-type`: one
+    /// [`enrich-node`] per field carrying an `enriched_by` mark, resolved to its
+    /// declared Function (the intake-runner topologically orders + runs them
+    /// between map and ingest). Empty when the type declares no enrichment. The
+    /// host FENCES a mark that does not resolve (a would-be effecting enrich
+    /// without the grant-with-ceiling) — a `schema-invalid` error.
+    enrich-plan: func(target-type: string, source: option<string>) -> result<list<enrich-node>, data-error>;
+
+    /// ADR-0082 Inc 5 — run ONE enrich Function by name over `args-json` (the
+    /// record's input slice), returning the result as a JSON string the runner
+    /// merges into the record. A PURE Function computes inline + ungated
+    /// (verbatim-decimal); an EFFECTING Function routes through the Effect-Gate
+    /// (gated, ceiling-bounded) — the host decides by the Function's
+    /// `side_effect_class`, so the runner stays effect-agnostic.
+    enrich-invoke: func(function-id: string, args-json: string, guard: option<string>) -> result<string, data-error>;
+
+    /// ADR-0112 step 3 (D5) — the enrichment WORKER's write-back: merge
+    /// `outputs-json` (an object of field → value) onto the stored record and
+    /// upsert it on the one convergence seam. The host VERIFIES every output
+    /// key is an `enriched_by`-marked field of the type (structural
+    /// containment — this verb can only fill enrichment outputs, never
+    /// overwrite domain fields), so the worker needs no broader write
+    /// capability. The upsert fires folds/triggers at depth+1 like any
+    /// authored write; the worker's outputs-only delta cannot re-arm its own
+    /// `changed(<input>)`-guarded trigger (ADR-0112 invariant 6). Returns the
+    /// record's new version.
+    enrich-apply: func(type-slug: string, key: string, outputs-json: string) -> result<u64, data-error>;
+}
+
+/// Schema-WRITE surface: define a type, or propose+apply a typed delta.
+/// These are the schema-OWNER operations — pinning and migrating types —
+/// kept in their own interface so the import-allowlist can refuse them to
+/// data workloads while still admitting the shared `types` records and
+/// the `ontology` reads (#965). Workloads FILL the ontology; the
+/// Chief/Host DEFINES it. Migrations are gated through the
+/// `wild:decisions` trail; all writes are ontology-log events, so
+/// `query.as-of` reads under the schema valid at T.
+interface schema {
+    use types.{type-def, type-status, field, relation, data-error};
+
+    /// A typed schema change against a pinned type. The op set MIRRORS the
+    /// compat classifier's transition vocabulary (ADR-0065 D6.3 / W2-F): each
+    /// op is gated, compat-classified, and `compat-epoch`-stamped at the
+    /// migration seam exactly as at the pin seam — additive ops (field/relation
+    /// add) carry the epoch forward, breaking ops (removal, status-deprecate)
+    /// bump it. The classifier stays the single additive-vs-breaking authority.
+    /// ADR-0065 D6.2 — widen an EXISTING `enum` field's closed value set. A new
+    /// member breaks no existing row, so the classifier reads it as ADDITIVE.
+    record add-enum-value {
+        /// The EXISTING enum field to widen.
+        field: string,
+        /// The value to add (a no-op if already present).
+        value: string,
+    }
+
+    /// ADR-0065 D6.2 — non-destructive field RENAME. Records the old name as an
+    /// alias so existing record bytes stay readable with no backfill, so the
+    /// classifier reads it as ADDITIVE.
+    record rename-field {
+        /// The EXISTING field name (or a current alias of it). (`from` is a WIT
+        /// keyword, so the carrier reads `from-name`/`to-name`.)
+        from-name: string,
+        /// The new canonical field name (must not already exist).
+        to-name: string,
+    }
+
+    /// ADR-0065 D6.2 — non-destructive relation RENAME (the relation-namespace
+    /// mirror of `rename-field`). ADDITIVE.
+    record rename-relation {
+        /// The EXISTING relation name (or a current alias of it).
+        from-name: string,
+        /// The new canonical relation name (must not already exist).
+        to-name: string,
+    }
+
+    /// ADR-0065 D6.2 — non-destructive enum-VALUE rename on an EXISTING enum
+    /// field; the old value stays readable via the value-alias. ADDITIVE.
+    record rename-enum-value {
+        /// The EXISTING enum field.
+        field: string,
+        /// The EXISTING member value (or a current alias of it).
+        from-name: string,
+        /// The new canonical member value (must not already exist).
+        to-name: string,
+    }
+
+    record schema-delta {
+        add-fields: list<field>,
+        remove-fields: list<string>,
+        /// Relations to add. A `reference` field added in the SAME delta is
+        /// backed by the relation that lands here (ADR-0065 T2 — the link is
+        /// the truth), so a reference-via-migration is now a first-class op
+        /// rather than a whole-type re-pin. A relation whose `via-field` does
+        /// not name a field of the post-delta type is rejected (no dangling
+        /// edge). Additive (the compat epoch is carried forward).
+        add-relations: list<relation>,
+        /// Relations to remove, by `name`. Breaking (a traversal/reference that
+        /// relied on the edge now fails), so removing one bumps the compat
+        /// epoch. Removing the backing relation of a still-present `reference`
+        /// field is rejected by the post-delta shape check.
+        remove-relations: list<string>,
+        /// ADR-0065 D6.2 — widen EXISTING enum fields (additive). Empty default,
+        /// so a delta staged before this field existed still loads.
+        add-enum-values: list<add-enum-value>,
+        /// ADR-0065 D6.2 — rename EXISTING fields (additive, alias-backed).
+        rename-fields: list<rename-field>,
+        /// ADR-0065 D6.2 — rename EXISTING relations (additive, alias-backed).
+        rename-relations: list<rename-relation>,
+        /// ADR-0065 D6.2 — rename EXISTING enum members (additive, alias-backed).
+        rename-enum-values: list<rename-enum-value>,
+        set-status: option<type-status>,
+    }
+
+    /// Pin a new type, or pin a new VERSION of an existing slug. Appends
+    /// a `type-pinned` ontology event and returns the stored type-def
+    /// with `version` + `schema-hash` filled in.
+    pin-type: func(def: type-def) -> result<type-def, data-error>;
+
+    /// Open a `wild:decisions` row (action-type `schema-migration`) for
+    /// the proposed delta on `slug`. Does NOT apply — returns the
+    /// decision-id so the caller can pair the later `apply-migration`.
+    propose-migration: func(slug: string, delta: schema-delta) -> result<string, data-error>;
+
+    /// Apply a previously proposed migration. Fails unless the decision
+    /// row resolved `confirmed`. Appends a `type-migrated` ontology
+    /// event, bumps `version`, recomputes `schema-hash`.
+    apply-migration: func(decision-id: string) -> result<type-def, data-error>;
+
+    /// The outcome of an additive schema evolution (`evolve-additive`):
+    /// either grown in place (the rule graduated to autonomy, or standing
+    /// consent covers it), or deferred as an operator decision.
+    variant evolve-result {
+        /// Applied in place; carries the stored, re-versioned type-def.
+        applied(type-def),
+        /// Opened an operator decision; carries the decision-id to confirm.
+        deferred(string),
+    }
+
+    /// Additively grow a pinned type by a `schema-delta` — add fields /
+    /// relations, widen an enum, rename a field/relation/value — WITHOUT a
+    /// whole-type re-pin. REFUSES a breaking delta (the compat classifier is
+    /// the authority); breaking changes belong on `propose-migration`
+    /// (High, operator-confirmed). Routes through the shared effect gate as
+    /// SchemaPin/Medium: gated as an operator decision on first use, but
+    /// auto-applied once the tribe graduates additive schema to autonomy —
+    /// the same admit-then-apply path the D10 curation seam uses, and the
+    /// hands-off path a chief uses to evolve its own ontology. Returns
+    /// `applied` when it grew in place, `deferred(decision-id)` when it
+    /// opened a decision. Unlike `propose-migration` (always two-step,
+    /// operator-paired), this never strands the autonomous caller.
+    evolve-additive: func(slug: string, delta: schema-delta) -> result<evolve-result, data-error>;
+
+    /// One indexed vector field of a [`vector-index-def`] — the field name
+    /// (which MUST be a `vector` field of the type) and its fusion `weight`
+    /// (relative; the weighted multi-field kNN normalises per-field distances
+    /// then scales by this).
+    record vector-index-field {
+        field: string,
+        weight: f32,
+    }
+
+    /// A chief-declared vector-index config (Strang 44 Wave 2) — selects
+    /// WHICH of a type's vector fields are indexed and with what fusion
+    /// WEIGHT. A SEPARATE owner-tier carrier (NOT part of the type-def), so
+    /// index tuning never remodels the type. Absent = the Wave-1 default
+    /// (every vector field indexed, equal weight).
+    record vector-index-def {
+        fields: list<vector-index-field>,
+    }
+
+    /// Declare (or replace) the vector-index config for a pinned type — the
+    /// owner-tier counterpart of `pin-type` for the index carrier (Strang 44
+    /// Wave 2). Lives on the schema-WRITE interface so it is withheld from
+    /// workloads (#965); the Chief declares it model-first like `view` /
+    /// `normalize`. Validated fail-closed against the type (each field MUST
+    /// exist and be a `vector` field), persisted to the FS carrier, and
+    /// triggers a re-index of the now-selected fields. NOT event-sourced.
+    declare-vector-index: func(type-slug: string, index: vector-index-def) -> result<_, data-error>;
+
+    /// One auto-embed mapping (ADR-0076 Inc 5): embed each record's `from` TEXT
+    /// field into its `to` VECTOR field.
+    record embed-source {
+        from-field: string,
+        to-field: string,
+    }
+
+    /// A type's auto-embed carrier (ADR-0076 Inc 5): which `(text → vector)`
+    /// field pairs the host embed reconciler backfills, so semantic kNN /
+    /// hybrid search works on a tribe's own records. A SEPARATE owner-tier
+    /// carrier (NOT part of the type-def), like `vector-index-def`.
+    record embed-source-def {
+        sources: list<embed-source>,
+    }
+
+    /// Declare (or replace) a type's auto-embed carrier (ADR-0076 Inc 5). On the
+    /// schema-WRITE interface (withheld from workloads, #965). Validated
+    /// fail-closed against the type (each `from` MUST be a `text` field, each
+    /// `to` a `vector` field), persisted to the FS carrier. NOT event-sourced —
+    /// the reconciler reads it to backfill record vectors.
+    declare-embed-source: func(type-slug: string, def: embed-source-def) -> result<_, data-error>;
+
+    /// ADR-0082 Inc 4b — a declared pure **Function**: a NAMED, reusable
+    /// view-grammar expression a field's `derived-from` references by `@name`
+    /// (`@vat-amount`) instead of inlining, so the same computation is declared
+    /// ONCE and reused. PURE by default; an `effecting` side-effect-class marks
+    /// a Function whose `enriched-by` use routes through the Effect-Gate.
+    record function-def {
+        /// The slug a `@name` reference resolves to (e.g. `gross`).
+        name: string,
+        /// The view-grammar expression the function computes (`amount * 1.19`).
+        /// Empty when the function is TOOL-backed (`backed-by` set).
+        expr: string,
+        /// Optional human description (the agent-facing "what this function does").
+        description: option<string>,
+        /// ADR-0082 Inc 5 — side-effect class. Absent / `pure` ⇒ a PURE
+        /// expression (computed inline, ungated, the default). `effecting` ⇒
+        /// an external call, gated.
+        side-effect-class: option<string>,
+        /// PR4 — the implementing TOOL slug, when the function is backed by a
+        /// component (`wild:tool-provider`) instead of an `expr`. `none` ⇒
+        /// expr-backed (the default). Set it (with `inputs`) to author a
+        /// tool-backed enricher (a geocoder, an LLM-classify).
+        backed-by: option<string>,
+        /// PR4 — the input fields a TOOL-backed function reads (its argument
+        /// object). Required for a tool-backed function (the enrich plan reads
+        /// them); `none` for an expr-backed one (its inputs come from the expr).
+        inputs: option<list<string>>,
+        /// ADR-0131 — tool-specific JSON/YAML config. Required and validated for
+        /// tool-backed Functions (e.g. the `llm-prompt` template, system prompt,
+        /// output parser and strategy); ignored for expr-backed Functions.
+        config: option<string>,
+        /// ADR-0141 D6 — the implementing PLUGIN backing, when the function is
+        /// backed by a `wild:function/backing` component instead of an `expr` or a
+        /// global tool. `none` ⇒ expr-backed or legacy tool-backed (the default).
+        plugin-backing: option<plugin-backing>,
+    }
+
+    /// ADR-0141 D6 — a plugin-provided function backing reference.
+    record plugin-backing {
+        /// Plugin slug that provides the backing.
+        plugin: string,
+        /// Short backing name within the plugin.
+        name: string,
+    }
+
+    /// ADR-0095 — declare (or replace) a per-tribe Function the chief then
+    /// REUSES in a field's `derived-from` (`@name`). The owner-tier, model-first
+    /// authoring surface (#965) for the dial-1 `coupling=function` corner, the
+    /// twin of `declare-vector-index` / `declare-embed-source`: on the
+    /// schema-WRITE interface (withheld from workloads), FS-canonical, validated
+    /// fail-closed (the expression MUST parse). Routes through the shared effect
+    /// gate (SchemaPin/Medium) like `evolve-additive` — auto-applied once the
+    /// tribe graduates additive schema to autonomy, else opened as an operator
+    /// decision — and is projected as the `behavior` Function node so the chief
+    /// can discover it via `describe` / `atlas_recommend`.
+    declare-function: func(def: function-def) -> result<_, data-error>;
+
+    /// One named measure of a `view-def` — a small deterministic view-grammar
+    /// expression evaluated IN ORDER (so a later measure may reference an
+    /// earlier one by name): `sum_exact(<source>.<decimal-field>)`,
+    /// `count(<source>)`, `sum_role(<concept>, <role>)`, decimal literals,
+    /// `+ - * /`, parens. Never an LLM in the compute path.
+    record view-measure {
+        name: string,
+        expr: string,
+    }
+
+    /// ADR-0097 D2 / ADR-0075 D6 — a chief-authored DERIVED VIEW: a
+    /// declarative, decimal-exact cross-table aggregate over several source
+    /// types sharing one DATE dimension, windowed `[as_of, as_of + window-days]`.
+    /// The guest-reachable twin of the operator's `atlas_create_view`: the
+    /// measures `view` is otherwise HOST-ONLY (deliberately absent from
+    /// `type-def`, so a guest structurally could not author one) — this typed
+    /// `view-def` is the narrow surface that lets the chief DECLARE a view, not
+    /// only read one via `query.compute-view`. The host builds the `write-authority:
+    /// derived` `type-def` (it owns no records of its own — no key, no fields)
+    /// carrying this `view` block and pins it through the same gate as
+    /// `pin-type`.
+    record view-def {
+        /// The slug naming this derived-view type.
+        slug: string,
+        /// The source types the measures aggregate over (each MUST be a pinned
+        /// type carrying `date-field` as a `date`). Lineage `schema-hash`es are
+        /// stamped by the engine at pin time.
+        sources: list<string>,
+        /// The shared DATE dimension every source is windowed on (P0: date only).
+        date-field: string,
+        /// Window length in days. Absent ⇒ the engine default (≈ unbounded); a
+        /// present value (incl. `0`, the as-of day alone) is honoured verbatim —
+        /// optional, NOT a `0`-sentinel, so the two view-author surfaces agree.
+        window-days: option<u32>,
+        /// The named measures, evaluated in order.
+        measures: list<view-measure>,
+        /// Optional lexicon display face (annotation, never schema shape).
+        display-name: option<string>,
+        description: option<string>,
+    }
+
+    /// ADR-0097 D2 — declare (or replace) a chief-authored derived view. The
+    /// guest-reachable counterpart of the operator's `atlas_create_view`,
+    /// closing the read-only-view hole (the chief could `compute-view` a balance
+    /// but had no verb to author one, since `view` is host-only). On the
+    /// schema-WRITE interface (withheld from workloads, #965); the host
+    /// assembles the `write-authority: derived` `type-def` and routes it through the
+    /// shared `SchemaPin` gate (Medium, autonomy-graduable) like `pin-type`,
+    /// validated fail-closed by the engine (write-authority derived, non-empty
+    /// sources/measures, the dimension a `date` field on every source).
+    declare-view: func(def: view-def) -> result<_, data-error>;
+}
+
+/// OLTP write surface — consistent against the live projection. Every
+/// mutation appends an event (with a producer UUID); current state is
+/// the SQLite projection of the log.
+interface store {
+    use types.{data-error, record-out};
+
+    /// A record to write. `value` is canonical-JSON of the field map.
+    record record-in {
+        type-slug: string,
+        key: string,
+        value: list<u8>,
+    }
+
+    /// The provenance LOCATOR of an ingest batch's origin (ADR-0065 §8).
+    /// Carries only WHERE the data came from — never a `source-id`: the host
+    /// derives the content-addressed id from (`kind`, `uri`), writes the
+    /// `source` instance, stamps every record, and sets the `mirrored_from`
+    /// edge, so a forge-built adapter cannot fake or skip provenance.
+    record source-locator {
+        /// `csv-file` / `web-page` / `inbound-email` / `crm-mirror` / …
+        kind: string,
+        /// Locator: a blob-ref for a docked file, a URL, a message id.
+        uri: option<string>,
+        /// Human label (e.g. the original filename).
+        label: option<string>,
+        /// When the origin was captured (ISO `YYYY-MM-DD`).
+        captured-at: option<string>,
+        /// ADR-0065 D2 — the `intake_config` fingerprint (the pipeline) that
+        /// transformed this origin; the host writes it onto the `source`
+        /// object as the `transformed_by -> intake_config` via_field. Optional:
+        /// a non-pipeline ingest (a direct adapter) leaves it absent.
+        pipeline: option<string>,
+        /// ADR-0086 §1 — the declaring `intake_source` slug that drove this
+        /// ingest; the host writes it onto the `source` object as the
+        /// `produced_by -> intake_source` via_field. Optional: a direct
+        /// `wild data ingest` / hand-docked origin has no declaring source.
+        produced-by: option<string>,
+        /// ADR-0112 D8 — the extractor MECHANISM that produced these rows
+        /// (`tabular` / `doc-llm` / a forged mechanism). Optional: a
+        /// pre-extractor ingest (metadata-record, direct CLI) leaves it
+        /// absent. The membrane stamps it onto records whose type DECLARES
+        /// the field (feature-detected, so pre-upgrade types keep ingesting).
+        extractor-mechanism: option<string>,
+        /// ADR-0112 D8 — the extractor's version (keys reprocess/backfill).
+        extractor-version: option<string>,
+    }
+
+    /// Metadata returned after a successful write.
+    record record-meta {
+        type-slug: string,
+        key: string,
+        /// Per-record version — bumped on each accepted write. Use as
+        /// the next `expected-version` for compare-and-swap.
+        version: u64,
+        /// The event's producer UUID (idempotency key).
+        event-id: string,
+        /// Log position the event landed at (ordering key).
+        log-position: u64,
+    }
+
+    /// Upsert an `authored` record. Appends a `record-upserted` event.
+    /// `expected-version` (when set) is a compare-and-swap guard:
+    /// mismatch → `version-conflict`. Writes to `source-mirror` /
+    /// `derived` types → `not-writable`.
+    upsert: func(rec: record-in, expected-version: option<u64>) -> result<record-meta, data-error>;
+
+    /// Read the current (live-head) value of a record.
+    get: func(type-slug: string, key: string) -> result<record-out, data-error>;
+
+    /// Append a tombstone event. The record stops projecting; the log
+    /// (and as-of reads before the tombstone) keep it.
+    delete: func(type-slug: string, key: string) -> result<_, data-error>;
+
+    /// List current records of a type (live head), capped at `limit`.
+    list-records: func(type-slug: string, limit: u32) -> result<list<record-out>, data-error>;
+
+    /// Privileged ingest path for `source-mirror` records. Requires the
+    /// ingest capability (the source adapter / projection holds it) and
+    /// the target type MUST declare a `key`. The `source` LOCATOR is
+    /// mandatory (ADR-0065 §8): the host computes the `source_id`, writes the
+    /// `source` instance, stamps it onto every record, and sets the
+    /// `mirrored_from` edge — host-enforced, so the adapter cannot bypass it.
+    /// An empty locator → `source-required` and writes nothing. Appends one
+    /// `record-ingested` event per record; returns the count accepted.
+    ingest: func(source: source-locator, records: list<record-in>) -> result<u32, data-error>;
+}
+
+/// Read / as-of surface. In P0 reads hit the SAME SQLite projection as
+/// `store`, so live reads are consistent with writes; `as-of(T)` pins a
+/// reproducible replay snapshot.
+interface query {
+    use types.{data-error, as-of, record-out, view-result};
+
+    /// Aggregate operation. `sum`/`min`/`max`/`latest` need a `field`;
+    /// `count` ignores it. `count`/`sum` are valid on every aggregate
+    /// surface (flat, grouped, neighbour); `min`/`max`/`latest` are
+    /// flat-only f64 reductions over an `int`/`float` field. `latest` is
+    /// the field's value on the most-recently-written live record (highest
+    /// log position) — recency by write order, not by any date field.
+    enum agg-op {
+        count,
+        sum,
+        min,
+        max,
+        latest,
+    }
+
+    /// One nearest-neighbour result of a `find-by-knn` search: the matched
+    /// record (same `record-out` shape every read surface returns) and its
+    /// `distance` to the query vector under the index's metric (smaller =
+    /// closer). Results come back ordered by ascending `distance`.
+    record knn-hit {
+        %record: record-out,
+        distance: f32,
+    }
+
+    /// One full-text (FTS5) result of a `find-by-fts` search (ADR-0076 Inc 2):
+    /// the matched record (same `record-out` shape) and its relevance `score`
+    /// (higher = more relevant — the negated BM25 rank, so the lexical axis
+    /// fuses with the cosine axis on a bigger-is-better footing). Results come
+    /// back ordered by descending `score`.
+    record fts-hit {
+        %record: record-out,
+        score: f64,
+    }
+
+    /// One HYBRID result of a `find-by-hybrid` search (ADR-0076 Inc 4): a record
+    /// fused across the lexical (FTS5) and semantic (cosine kNN) axes by
+    /// Reciprocal Rank Fusion, with its fused `score` (higher = more relevant —
+    /// the RRF sum, NOT comparable to a raw BM25/cosine value). Ordered by
+    /// descending `score`.
+    record hybrid-hit {
+        %record: record-out,
+        score: f64,
+    }
+
+    /// Read a record as-of a log point.
+    get-as-of: func(type-slug: string, key: string, at: as-of) -> result<record-out, data-error>;
+
+    /// Scan records of a type as-of a log point, capped at `limit`.
+    scan: func(type-slug: string, at: as-of, limit: u32) -> result<list<record-out>, data-error>;
+
+    /// Indexed equality lookup: records of a type whose top-level field
+    /// `field` equals `value` (a JSON fragment), as-of a log point,
+    /// capped at `limit`. A JSON-number `value` matches the numeric
+    /// index column, anything else the text column. Backed by the
+    /// additive `record_index` projection; tombstoned records never
+    /// match. Existing `scan`/`aggregate` are unchanged (no push-down).
+    find-by-field: func(type-slug: string, field: string, value: list<u8>, at: as-of, limit: u32) -> result<list<record-out>, data-error>;
+
+    /// Indexed INCLUSIVE range lookup: records of a type whose top-level
+    /// `field` lies in `[lo, hi]` (both JSON fragments), as-of a log point,
+    /// capped at `limit`. A JSON-number pair ranges the numeric index
+    /// column, a non-number pair the text column (ISO dates sort
+    /// lexicographically, so "due in the next 7 days" is a date range). The
+    /// two bounds MUST agree on kind — a number/non-number mix is
+    /// `schema-invalid`. Results are ordered by the ranged VALUE ascending
+    /// (business `key` the deterministic tiebreak), matching `scan-page`. The
+    /// range counterpart of `find-by-field`; tombstoned records never match.
+    /// Not supported on derived types.
+    find-by-range: func(type-slug: string, field: string, lo: list<u8>, hi: list<u8>, at: as-of, limit: u32) -> result<list<record-out>, data-error>;
+
+    /// One keyset cursor position — the LAST row of the previous page: its
+    /// sort-axis value (`num` XOR `txt`, both absent when ordering by the
+    /// business key) plus its `key`. The next page resumes strictly past it,
+    /// drift-free under concurrent inserts.
+    record page-cursor {
+        num: option<f64>,
+        txt: option<string>,
+        key: string,
+    }
+
+    /// An inclusive field predicate that narrows a paged scan: records whose
+    /// top-level `field` is in `[lo, hi]` (JSON fragments; equality = `lo`
+    /// equals `hi`). Same num-vs-txt axis resolution as `find-by-range`.
+    record scan-filter {
+        field: string,
+        lo: list<u8>,
+        hi: list<u8>,
+    }
+
+    /// One page of an ordered scan: the `records`, the ordered-set `total`
+    /// (the whole filtered set, for "page N of M"), and the `next` keyset
+    /// cursor — present iff the page filled `limit` (more may follow).
+    record paged-records {
+        records: list<record-out>,
+        total: u64,
+        next: option<page-cursor>,
+    }
+
+    /// Ordered + paged scan of a type's LIVE records — the read-time envelope
+    /// (ADR-0065 D6). `order-field` none = business-key order; `descending`
+    /// flips it; `filter` narrows to an inclusive field predicate (the
+    /// virtual-view case); `after` resumes strictly past a prior page's last
+    /// row (keyset, drift-free); `offset` is the coarse alternative (ignored
+    /// when `after` is set). A scalar `order-field` sorts numerically for
+    /// int/float/decimal, lexically otherwise (ISO dates correct). LIVE-only:
+    /// the keyset rides the live index, so a non-live `at` is rejected; a
+    /// normalize/silver type is `schema-invalid`.
+    scan-page: func(type-slug: string, order-field: option<string>, descending: bool, filter: option<scan-filter>, after: option<page-cursor>, offset: option<u32>, limit: u32, at: as-of) -> result<paged-records, data-error>;
+
+    /// Aggregate over a type as-of a log point. Returns the scalar
+    /// result as f64 (count is an exact integer in f64 range for P0
+    /// volumes). A `sum` over a `decimal` field is REJECTED here
+    /// (`schema-invalid`) — f64 cannot represent the exact result; use
+    /// `sum-exact` instead. `int`/`float` sums stay on this path.
+    /// `min`/`max`/`latest` are f64-only reductions over an `int`/`float`
+    /// field; an empty set is `not-found` (distinct from a real `0`); a
+    /// `decimal`/`date`/`text` field is `schema-invalid` (no exact
+    /// min/max is offered).
+    aggregate: func(type-slug: string, op: agg-op, field: option<string>, at: as-of) -> result<f64, data-error>;
+
+    /// `count`/`sum` of a type's live records bucketed by `group-by`,
+    /// returned as `(group, value)` pairs sorted by group, as-of a log
+    /// point. `count` is the per-group record count; `sum` is the EXACT
+    /// decimal sum of `field` per group (no f64 — a per-counterparty money
+    /// total is lossless). `min`/`max`/`latest` are flat-only and rejected
+    /// (`schema-invalid`). Not supported on derived types — group a source.
+    aggregate-grouped: func(type-slug: string, op: agg-op, field: option<string>, group-by: string, at: as-of) -> result<list<tuple<string, string>>, data-error>;
+
+    /// EXACT sum over a `decimal` field as-of a log point (F8). Reads the
+    /// stored decimal STRINGS of the live/at records, sums them with
+    /// base-10 arithmetic (no f64 anywhere), and returns the exact result
+    /// as a string (empty set → "0"). The field MUST be `decimal`;
+    /// calling it on any other type is `schema-invalid` (use `aggregate`
+    /// for `int`/`float`). This is the lossless counterpart `aggregate`
+    /// cannot be because its return type is f64.
+    sum-exact: func(type-slug: string, field: string, at: as-of) -> result<string, data-error>;
+
+    /// Compute a `derived` type's declarative VIEW at one business
+    /// `as-of-date` — the medallion's Gold tier, exposed to workloads so a
+    /// component can consume the SAME aggregate the CLI/MCP read through the
+    /// host. DETERMINISTIC + decimal-exact (no LLM, no f64): the ordered
+    /// `measures` come back as exact-decimal STRINGS, with per-source
+    /// `lineage`/`drift`. `as-of-date` anchors the business window; `at`
+    /// pins the log replay snapshot (`as-of(T)`), independent of the window
+    /// anchor. A pure READ — appends no event and (like the other `query`
+    /// reads) bypasses the effect gate. `schema-invalid` if `type-slug` is
+    /// not a derived view.
+    compute-view: func(type-slug: string, as-of-date: string, at: as-of) -> result<view-result, data-error>;
+
+    /// k-NEAREST-NEIGHBOUR search over one `vector` field (Strang 44): the
+    /// `k` records of `type-slug` whose `field` embedding is closest to
+    /// `query`, ordered by ascending distance. EXACT brute-force (100%
+    /// recall — no approximate HNSW; regulated dedup needs exactness),
+    /// served by the field's `vec0` index. `query`'s length MUST equal the
+    /// field's `vector-dim` (else `schema-invalid`); `field` MUST be a
+    /// `vector` field (else `schema-invalid`). `at` pins the log replay
+    /// snapshot — live head uses the persistent index, an as-of read rebuilds
+    /// it in the snapshot, so kNN is reproducible at any log point. A pure
+    /// READ: appends no event, bypasses the effect gate. Tombstoned records
+    /// never match.
+    find-by-knn: func(type-slug: string, field: string, query: list<f32>, k: u32, at: as-of) -> result<list<knn-hit>, data-error>;
+
+    /// BM25 FULL-TEXT search over a type's non-sensitive `text` fields
+    /// (ADR-0076 Inc 2 — the lexical sibling of `find-by-knn`): the `k` records
+    /// of `type-slug` whose text best matches the free-text `query`, ordered by
+    /// descending relevance `score`. The query is treated as injection-safe
+    /// literal terms (FTS5 operators are neutralised). `schema-invalid` if the
+    /// type has no full-text-indexed field (no non-sensitive `text` field);
+    /// SENSITIVE text fields are never indexed, so a search can never surface
+    /// them. `at` pins the log replay snapshot (reproducible at any log point).
+    /// A pure READ: appends no event, bypasses the effect gate. Tombstoned
+    /// records never match.
+    find-by-fts: func(type-slug: string, query: string, k: u32, at: as-of) -> result<list<fts-hit>, data-error>;
+
+    /// HYBRID search (ADR-0076 Inc 4): the `k` records of `type-slug` ranked by
+    /// RECIPROCAL RANK FUSION of the lexical axis (`text-query` over the FTS5
+    /// index) and the semantic axis (`query-vec` over `field`'s cosine kNN),
+    /// ordered by descending fused `score`. DEFINED DEGRADATION: a failing axis
+    /// (no text field, or `field` not a vector field) contributes nothing; only
+    /// an all-axes failure errors. `at` pins both axes' as-of snapshot. A pure
+    /// READ: appends no event, bypasses the effect gate.
+    find-by-hybrid: func(type-slug: string, field: string, text-query: string, query-vec: list<f32>, k: u32, at: as-of) -> result<list<hybrid-hit>, data-error>;
+
+    /// One field's query vector for a weighted multi-field kNN — the field
+    /// name (a `vector` field) and the query embedding to match it against.
+    record field-query {
+        field: string,
+        query: list<f32>,
+    }
+
+    /// WEIGHTED multi-field k-NN (Strang 44 Wave 2): rank records by a fusion
+    /// of several vector fields at once. Each `field-query` is matched against
+    /// its field's `vec0` index (single-vector MATCH per table — vec0 itself
+    /// does not fuse); the host normalises each field's distances and combines
+    /// them by the per-field WEIGHT from the type's declared
+    /// `vector-index-def` (default weight 1.0 for a field absent from the
+    /// carrier or when no carrier is declared), then re-sorts ascending by the
+    /// fused distance and returns the top `k`. Each query's length MUST equal
+    /// its field's `vector-dim`; a non-vector field is `schema-invalid`. `at`
+    /// pins the log snapshot like every read.
+    find-by-knn-weighted: func(type-slug: string, queries: list<field-query>, k: u32, at: as-of) -> result<list<knn-hit>, data-error>;
+
+    /// ADR-0058 Strand A2 — read `learning` records from the ROOT tribe's
+    /// lake, the fleet knowledge COMMONS. A host-fixed, READ-ONLY,
+    /// cross-tribe recall: the host always reads tribe `root`, type
+    /// `learning`, live head, regardless of the calling guest's tribe —
+    /// the ONLY cross-tribe read in this surface, so a guest can learn
+    /// from the fleet WITHOUT any write path into another tribe's lake
+    /// (the mirror reconciler is the sole commons writer, host-side).
+    /// `field` empty ⇒ most-recent rows; else indexed equality on
+    /// `field`=`value` (the `goal_form` / `cap_ref` recall keys, the
+    /// `value` a canonical-JSON fragment like `find-by-field`), capped at
+    /// `limit`. Sensitive fields stay masked (the caller holds no blanket
+    /// read grant), and the rows already carry `source_tribe` provenance.
+    /// ADR-0239 — a learning a newer operator statement replaced
+    /// (`superseded_by` set) is NOT returned: you always read the current
+    /// statement, with no convention to remember. Unlike `find-by-field`,
+    /// this read is host-fixed to the `learning` type, so the rule lives
+    /// here rather than in each caller. The retired rows stay in the lake
+    /// and are read back operator-side, not through this surface.
+    recall-commons: func(field: string, value: list<u8>, limit: u32) -> result<list<record-out>, data-error>;
+}
+
+/// Typed graph traversal over the ontology's relations. Edges are
+/// DERIVED, never written here: each `relation` with a `via-field`
+/// defines a typed edge `src --relation--> dst`, where `dst` is the
+/// record whose `key` equals the source record's `via-field` value. A
+/// materialised `edges` projection is rebuilt from the same event log as
+/// `records`, so traversal is as-of-reproducible. The default engine is a
+/// recursive SQLite CTE; AGE / Kùzu backends are deferred registry
+/// entries. These are TYPED primitives over named relations, NOT raw
+/// Cypher; every traversal is bounded by a `max-depth` cap.
+interface graph {
+    use types.{data-error, as-of};
+    use query.{agg-op};
+
+    /// A node reached by a traversal. `depth` is the hop distance from
+    /// the start (0 for the start node itself on `path`; ≥1 for nodes
+    /// returned by `neighbors`/`traverse`/`ancestors`/`descendants`). The
+    /// record's value is not inlined — fetch it via `store.get` /
+    /// `query.get-as-of` with the same `type-slug`+`key`.
+    record node {
+        type-slug: string,
+        key: string,
+        depth: u32,
+    }
+
+    /// One node plus a centrality score.
+    record centrality-hit {
+        node: node,
+        score: f64,
+    }
+
+    /// One connected component — a set of nodes that are mutually
+    /// reachable when edges are treated as undirected.
+    record component {
+        members: list<node>,
+    }
+
+    /// Direct neighbours of `(type-slug, key)` along one named relation —
+    /// the `dst` of every `src --relation--> dst` edge out of the node
+    /// (depth 1). A relation with no `via-field`, or a node with no such
+    /// edges, yields an empty list (not an error).
+    neighbors: func(type-slug: string, key: string, relation: string, at: as-of) -> result<list<node>, data-error>;
+
+    /// Depth-1 neighbours along one relation whose `field` lies in the
+    /// INCLUSIVE range `[lo, hi]` — filter-during-traversal. `inbound`
+    /// flips edge direction: `false` emits the node's targets
+    /// (`src --relation--> dst`), `true` emits everything pointing AT the
+    /// node (the "this creditor's obligations" shape). The neighbour's
+    /// `field` is matched the same num-vs-txt way a flat range is (so an
+    /// ISO-date range works); tombstoned neighbours excluded.
+    neighbors-where: func(type-slug: string, key: string, relation: string, inbound: bool, field: string, lo: list<u8>, hi: list<u8>, at: as-of) -> result<list<node>, data-error>;
+
+    /// `count`/`sum` of a node's depth-1 neighbours along one relation, as
+    /// an EXACT string, as-of a log point. `inbound` flips direction:
+    /// `true` aggregates everything pointing AT the node — the §17 headline
+    /// ("sum of all obligations of this creditor"). `count` needs no
+    /// `field`; `sum` folds the neighbour records' `field` losslessly
+    /// (decimal or int/float). Other ops are `schema-invalid`. Tombstoned
+    /// neighbours excluded.
+    aggregate-neighbors: func(type-slug: string, key: string, relation: string, inbound: bool, op: agg-op, field: option<string>, at: as-of) -> result<string, data-error>;
+
+    /// Follow a SEQUENCE of named relations from `(type-slug, key)`: hop i
+    /// expands the current frontier along `relation-path[i]` (forward
+    /// edges). Stops after `min(len(relation-path), max-depth)` hops.
+    /// Returns every distinct node discovered (excluding the start),
+    /// tagged with the hop it was first reached at; a `visited` set makes
+    /// cycles terminate.
+    traverse: func(type-slug: string, key: string, relation-path: list<string>, max-depth: u32, at: as-of) -> result<list<node>, data-error>;
+
+    /// Transitive closure FOLLOWING one relation FORWARD from the node
+    /// (the node → its targets → their targets …), bounded by `max-depth`.
+    /// For a `parent_of` edge modelled as `child.parent -> parent`, these
+    /// are the node's ancestors (parent, grandparent, …).
+    ancestors: func(type-slug: string, key: string, relation: string, max-depth: u32, at: as-of) -> result<list<node>, data-error>;
+
+    /// Transitive closure FOLLOWING one relation BACKWARD into the node
+    /// (everything that reaches the node along the relation), bounded by
+    /// `max-depth`. Mirror of `ancestors`: for the same `parent_of` edge
+    /// these are the node's descendants (children, grandchildren, …).
+    descendants: func(type-slug: string, key: string, relation: string, max-depth: u32, at: as-of) -> result<list<node>, data-error>;
+
+    /// One shortest path (by hop count) from `(from-type, from-key)` to
+    /// `(to-type, to-key)`, following forward edges, bounded by
+    /// `max-depth`. `relation` set restricts the walk to that one label;
+    /// `none` walks edges of any relation. Returns the node sequence
+    /// start→target (start at depth 0, target at depth N), or `none` if
+    /// the target is unreachable within `max-depth`.
+    path: func(from-type: string, from-key: string, to-type: string, to-key: string, relation: option<string>, max-depth: u32, at: as-of) -> result<option<list<node>>, data-error>;
+
+    /// Degree centrality of nodes of one type: how many edges of the
+    /// given relation touch each node. `inbound: true` counts incoming
+    /// edges (`dst` = the node); `inbound: false` counts outgoing edges
+    /// (`src` = the node). `relation: none` counts edges of any relation.
+    /// Results are ordered by score descending, then by type/key; capped
+    /// at `limit`.
+    degree-centrality: func(type-slug: string, relation: option<string>, inbound: bool, limit: u32, at: as-of) -> result<list<centrality-hit>, data-error>;
+
+    /// Connected components of the graph, treating edges as undirected.
+    /// Only edges of `relation` are considered when set; otherwise all
+    /// edges. The walk is capped at `max-nodes` nodes total across all
+    /// components to prevent runaway reads.
+    connected-components: func(relation: option<string>, max-nodes: u32, at: as-of) -> result<list<component>, data-error>;
+}
+
+/// Root-scoped graph traversal. Identical primitives to `graph`, but the
+/// host always resolves them against the ROOT tribe (`data/root/projection.sqlite`)
+/// — the fleet-wide system self-model. This is the read surface for
+/// `ontology_query` / Elder / Chief workloads that reason across tribes.
+/// The caller does NOT supply a tribe; the host injects a privileged
+/// `system_root()` caller and routes every read to root.
+interface root-graph {
+    use types.{data-error, as-of};
+    use query.{agg-op};
+    use graph.{node, centrality-hit, component};
+
+    /// Direct neighbours in the root self-model along one named relation.
+    neighbors: func(type-slug: string, key: string, relation: string, at: as-of) -> result<list<node>, data-error>;
+
+    /// Depth-1 filtered neighbours in the root self-model.
+    neighbors-where: func(type-slug: string, key: string, relation: string, inbound: bool, field: string, lo: list<u8>, hi: list<u8>, at: as-of) -> result<list<node>, data-error>;
+
+    /// `count`/`sum` of a root node's depth-1 neighbours along one relation.
+    aggregate-neighbors: func(type-slug: string, key: string, relation: string, inbound: bool, op: agg-op, field: option<string>, at: as-of) -> result<string, data-error>;
+
+    /// Follow a sequence of named relations in the root self-model.
+    traverse: func(type-slug: string, key: string, relation-path: list<string>, max-depth: u32, at: as-of) -> result<list<node>, data-error>;
+
+    /// Transitive closure following one relation forward in the root graph.
+    ancestors: func(type-slug: string, key: string, relation: string, max-depth: u32, at: as-of) -> result<list<node>, data-error>;
+
+    /// Transitive closure following one relation backward in the root graph.
+    descendants: func(type-slug: string, key: string, relation: string, max-depth: u32, at: as-of) -> result<list<node>, data-error>;
+
+    /// Shortest path between two root self-model nodes.
+    path: func(from-type: string, from-key: string, to-type: string, to-key: string, relation: option<string>, max-depth: u32, at: as-of) -> result<option<list<node>>, data-error>;
+
+    /// Degree centrality across root nodes of one type.
+    degree-centrality: func(type-slug: string, relation: option<string>, inbound: bool, limit: u32, at: as-of) -> result<list<centrality-hit>, data-error>;
+
+    /// Connected components of the root self-model graph.
+    connected-components: func(relation: option<string>, max-nodes: u32, at: as-of) -> result<list<component>, data-error>;
+}
+
+/// Inbound document-intake govern seam (Strang 45). A WORKLOAD producer —
+/// a forgeable extract worker that parses a document (format tool, e.g.
+/// pdf-parser) and reads its fields (wild:ai) — submits FINISHED candidate
+/// records here; the host runs the generic, gated govern-core over them.
+/// The EXTRACT (parse + LLM) is deliberately the CALLER's job and NOT in
+/// the host (Core-vs-Chair, Strang 30): formats are forgeable tools, the
+/// host-core is format-agnostic. Added additively back when the package was
+/// `@0.2.0`, long before the `@0.5.0` publish (history: `docs/wit-versions.md`).
+interface intake {
+    use types.{data-error};
+
+    /// One soft-extracted candidate from a producer: the proposed record
+    /// value (canonical JSON object), the source page it was read from
+    /// (1-based; `0` = no page structure — the provenance locator), and the
+    /// extractor's confidence in `[0,1]`.
+    record candidate {
+        value: string,
+        page: u32,
+        confidence: f32,
+    }
+
+    /// One candidate the host gate held for operator confirmation — the
+    /// frozen/soft seam. `decision-id` is the decisions row id (empty when
+    /// the gate gated without a row).
+    record pending-confirm {
+        candidate-id: string,
+        decision-id: string,
+    }
+
+    /// The result of governing a producer's candidates for one document.
+    record intake-outcome {
+        /// Every candidate staged in its OWN type (never the target type).
+        staged: list<string>,
+        /// `<target-type>/<key>` of candidates auto-confirmed into governed
+        /// records (the gate admitted).
+        governed: list<string>,
+        /// Candidates the gate held for operator confirmation (regulated /
+        /// default) — NOT promoted.
+        pending: list<pending-confirm>,
+        /// Candidates suppressed as duplicates of an existing governed
+        /// record (`same-as` dedup — never double-counted).
+        duplicates: list<string>,
+    }
+
+    /// The document-wide submission context (ADR-0112 D8): one blob, one
+    /// extractor, optionally the declaring source + item origin. Restructured
+    /// from the positional `(target-type, blob-ref, extractor-version,
+    /// candidates)` form on the UNPUBLISHED `@0.8.0` (all consumers in-tree).
+    record candidate-submission {
+        /// The pinned authored type the candidates target.
+        target-type: string,
+        /// The document blob the candidates were read from.
+        blob-ref: string,
+        /// ADR-0112 D8 — the extractor mechanism (`doc-llm`, a forged one).
+        extractor-mechanism: string,
+        /// The extractor's version (keys reprocess/backfill).
+        extractor-version: string,
+        /// ADR-0112 D8 — the declaring `intake_source` slug, when the
+        /// extraction was driven by a declared source. Absent for a
+        /// hand-docked / chief-verb document with no declaring source.
+        source-slug: option<string>,
+        /// The per-item origin locator (host path / URL), when known.
+        item-uri: option<string>,
+        /// RESERVED (ADR-0112 D4): the extractor's declared trust token
+        /// (`deterministic` | `needs-confirmation`). Read by the uniform
+        /// trust gate when migration step 6 re-keys the entry; until then
+        /// every submission takes today's stage→confirm path. Absent =
+        /// `needs-confirmation` (fail-safe).
+        trust: option<string>,
+        candidates: list<candidate>,
+    }
+
+    /// Submit finished candidates for `submission.target-type` (a pinned
+    /// authored type) and run the host govern-core: stage each candidate in
+    /// its own `extraction_candidate` type → RESOLVE (fuzzy dedup against the
+    /// target type) → gate-aware CONFIRM → GOVERN (a SEPARATE authored
+    /// record + a `record_provenance` side-car carrying `blob-ref` + page +
+    /// the D8 extractor/source provenance).
+    ///
+    /// Three host-enforced invariants the caller CANNOT bypass: a candidate
+    /// is never written into the target type except as a confirmed copy
+    /// (type-separation); a regulated candidate stays `pending` for the
+    /// operator (host-gated CONFIRM); nothing is governed without passing
+    /// the risk×role gate.
+    submit-candidates: func(submission: candidate-submission) -> result<intake-outcome, data-error>;
+}

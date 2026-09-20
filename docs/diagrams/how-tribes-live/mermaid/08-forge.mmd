@@ -1,0 +1,7 @@
+flowchart LR
+    Gap["Chief notices a<br/>missing capability"] --> Spec["writes a tool spec"]
+    Spec --> Forge["🔥 Forge: LLM writes Rust<br/>(allowlisted crates)"]
+    Forge --> Sandbox["build in sandbox<br/>→ Wasm component"]
+    Sandbox --> Sign["content-hash +<br/>install as a plugin"]
+    Sign --> Use["next cycle:<br/>the tool is just there"]
+    Use -.->|"and it's remembered<br/>for next time"| Gap

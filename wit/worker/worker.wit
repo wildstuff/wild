@@ -1,0 +1,40 @@
+// `wild:worker` — installable worker primitive.
+//
+// A plugin that exports `wild:worker/handler` is scheduled by the host as an
+// event-driven worker, exactly like the older `wild:messaging/handler` path.
+// The split package lets the host distinguish the *worker* primitive from the
+// generic messaging surface while keeping the wire shape identical.
+
+package wild:worker@0.1.0;
+
+// Types common to worker-triggered messages. Intentionally identical to
+// `wild:messaging/types` so a host can forward a broker message verbatim.
+interface types {
+    record broker-message {
+        subject: string,
+        body: list<u8>,
+        headers: list<tuple<string, string>>,
+    }
+}
+
+// Components implement this to receive routed worker tasks.
+interface handler {
+    use types.{broker-message};
+
+    // Invoked once per delivered message. `Err(msg)` is logged and the
+    // delivery is NACK'd by default.
+    handle-message: func(msg: broker-message) -> result<_, string>;
+}
+
+// Optional runtime discovery of the triggers this worker role supports.
+// The sidecar still carries the default subscription template; this interface
+// is used by dashboards to render choosable triggers without hard-coding them.
+interface meta {
+    record trigger-spec {
+        name: string,
+        description: string,
+        default-subject: option<string>,
+    }
+
+    list-triggers: func() -> list<trigger-spec>;
+}

@@ -1,0 +1,10 @@
+flowchart LR
+    Add["wild plugin add oci://…<br/>(or Elder installs from<br/>the marketplace)"] --> Pull["pull component + sidecar<br/>digest-pinned"]
+    Pull --> Verify{"signature over<br/>the sidecar?"}
+    Verify -->|"Wild's shipped key"| Verified["tier: verified"]
+    Verify -->|"a key you allowlisted"| Community["tier: community"]
+    Verify -->|"none / unknown key"| Unknown["tier: unknown"]
+    Verified --> Cache["written to your<br/>profile's plugin cache"]
+    Community --> Cache
+    Unknown --> Cache
+    Cache --> Live["running daemon<br/>hot-loads it — no restart"]

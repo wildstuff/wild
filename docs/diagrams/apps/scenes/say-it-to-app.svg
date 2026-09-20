@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#0b1220" flood-opacity="0.07"/>
+    </filter>
+    <marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 0 0.8 L 7 4 L 0 7.2" fill="none" stroke="#8c959f" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <rect x="2" y="2" width="1196" height="396" rx="20" fill="#ffffff" stroke="#d0d7de"/>
+
+  <!-- 1 say it -->
+  <g filter="url(#soft)">
+    <rect x="56" y="120" width="270" height="92" rx="18" fill="#eef6ff" stroke="#c9ddf5"/>
+  </g>
+  <path d="M 100 212 l -10 16 l 24 -16 z" fill="#eef6ff" stroke="#c9ddf5"/>
+  <text x="80" y="156" font-size="14.5" font-weight="600" fill="#1f2328">“Give my team an app</text>
+  <text x="80" y="178" font-size="14.5" font-weight="600" fill="#1f2328">for open items.”</text>
+  <text x="80" y="248" font-size="12" fill="#57606a">one sentence to Elder</text>
+
+  <path d="M 326 166 L 378 166" stroke="#8c959f" stroke-width="1.4" marker-end="url(#a)"/>
+
+  <!-- 2 elder reads the ontology -->
+  <g filter="url(#soft)">
+    <rect x="388" y="96" width="250" height="140" rx="14" fill="#fbfdff" stroke="#c9ddf5"/>
+  </g>
+  <text x="412" y="128" font-size="13.5" font-weight="600" fill="#1f2328">Elder reads the ontology</text>
+  <text x="412" y="150" font-size="12" fill="#57606a">what exists · what may be done ·</text>
+  <text x="412" y="167" font-size="12" fill="#57606a">who is allowed to see it</text>
+  <g filter="url(#soft)">
+    <rect x="412" y="184" width="88" height="30" rx="8" fill="#ffffff" stroke="#d0d7de"/>
+    <rect x="512" y="184" width="102" height="30" rx="8" fill="#ffffff" stroke="#d0d7de"/>
+  </g>
+  <text x="456" y="204" text-anchor="middle" font-size="12" font-weight="600" fill="#1f2328">Invoice</text>
+  <text x="563" y="204" text-anchor="middle" font-size="12" font-weight="600" fill="#1f2328">verify ✓ · pay 🔒</text>
+  <text x="412" y="262" font-size="12" fill="#007aff">nothing to design — it's all declared</text>
+
+  <path d="M 638 166 L 690 166" stroke="#8c959f" stroke-width="1.4" marker-end="url(#a)"/>
+
+  <!-- 3 the app, derived -->
+  <g filter="url(#soft)">
+    <rect x="700" y="80" width="240" height="200" rx="14" fill="#ffffff" stroke="#d0d7de"/>
+  </g>
+  <text x="724" y="112" font-size="13.5" font-weight="600" fill="#1f2328">The app — derived</text>
+  <g filter="url(#soft)">
+    <rect x="724" y="128" width="192" height="30" rx="8" fill="#f6f8fa" stroke="#e3e9f0"/>
+    <rect x="724" y="166" width="92" height="44" rx="8" fill="#f6f8fa" stroke="#e3e9f0"/>
+    <rect x="824" y="166" width="92" height="44" rx="8" fill="#f6f8fa" stroke="#e3e9f0"/>
+    <rect x="724" y="218" width="192" height="34" rx="17" fill="#eef6ff" stroke="#c9ddf5"/>
+  </g>
+  <text x="820" y="148" text-anchor="middle" font-size="11.5" fill="#57606a">table — open invoices</text>
+  <text x="770" y="185" text-anchor="middle" font-size="11" fill="#57606a">KPI tile</text>
+  <text x="770" y="200" text-anchor="middle" font-size="10.5" font-weight="600" fill="#1f2328">overdue €</text>
+  <text x="870" y="185" text-anchor="middle" font-size="11" fill="#57606a">chart</text>
+  <text x="870" y="200" text-anchor="middle" font-size="10.5" font-weight="600" fill="#1f2328">by debtor</text>
+  <text x="820" y="240" text-anchor="middle" font-size="12" font-weight="600" fill="#0a5dc2">Mark as checked</text>
+  <text x="724" y="304" font-size="12" fill="#57606a">refine by sentence — “make the</text>
+  <text x="724" y="321" font-size="12" fill="#57606a">forecast a table” — live, no deploy</text>
+
+  <path d="M 940 166 L 992 166" stroke="#8c959f" stroke-width="1.4" marker-end="url(#a)"/>
+
+  <!-- 4 people -->
+  <g fill="none" stroke="#57606a" stroke-width="1.8" stroke-linecap="round">
+    <rect x="1002" y="108" width="40" height="72" rx="8"/>
+    <line x1="1016" y1="170" x2="1028" y2="170"/>
+  </g>
+  <rect x="1009" y="120" width="26" height="18" rx="3" fill="#eef4ff"/>
+  <rect x="1009" y="142" width="26" height="5" rx="2.5" fill="#e3e9f0"/>
+  <rect x="1009" y="151" width="18" height="5" rx="2.5" fill="#e3e9f0"/>
+  <text x="1062" y="130" font-size="13.5" font-weight="600" fill="#1f2328">Their phone,</text>
+  <text x="1062" y="149" font-size="13.5" font-weight="600" fill="#1f2328">their browser</text>
+  <text x="1062" y="172" font-size="11.5" fill="#57606a">served on your network</text>
+  <text x="1002" y="220" font-size="11.5" fill="#57606a">no login of yours shared —</text>
+  <text x="1002" y="237" font-size="11.5" fill="#57606a">each person sees exactly</text>
+  <text x="1002" y="254" font-size="11.5" fill="#57606a">what they're allowed to</text>
+
+  <text x="600" y="356" text-anchor="middle" font-size="13" fill="#8c959f">Nobody wrote code. Publishing is a decision you confirm — and you preview everything in your dashboard first.</text>
+</svg>

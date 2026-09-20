@@ -1,0 +1,19 @@
+{
+  "slug": "sticky-note",
+  "version": "0.1.0",
+  "source": {
+    "type": "local",
+    "path": "sticky-note-0.1.0.wasm"
+  },
+  "wasm_filename": "sticky-note-0.1.0.wasm",
+  "trust": {
+    "tier": "community"
+  },
+  "provides": [
+    "wild:ui/widget@0.1.0"
+  ],
+  "capability_bundles": [],
+  "config_keys": [],
+  "secret_aliases": [],
+  "default_pool_size": 1
+}

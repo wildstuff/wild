@@ -1,0 +1,124 @@
+// `wild:intake` — host-orchestrated source probing for the unified
+// intake pipeline.
+//
+// The chief decides a column→field+type mapping for a new source by
+// looking at the source's RAW column names + a sample row. Producing
+// that probe means reading a file and splitting it on a delimiter —
+// the one file-read + format-split seam that, pre-Strang-51, still
+// lived inside the chief. This interface lifts it out: the chief asks
+// the host for the sample, the host orchestrates the SAME tools the
+// async runner uses (connector `enumerate`→`fetch` → format adapter
+// `csv-sample`), and hands back `{ columns, sample-rows }`.
+//
+// The chief reads nothing and parses nothing — it stays a pure
+// coordinator (Core-vs-Chair). Because the probe runs the exact same
+// adapter over the exact same fetched blob the runner sees later,
+// `shape-fingerprint(columns)` is identical on both sides by
+// construction.
+//
+// Heritage: A3 (2026-06-10). The host helper replays the runner's
+// first two steps synchronously rather than waiting on an async worker
+// escalation, so the chief decides the mapping in the SAME cycle —
+// with the onboarding skill still in context.
+
+package wild:source-probe@0.2.0;
+
+interface sample {
+    /// The raw header + a few raw rows of the first source item,
+    /// exactly as the file spells them (un-normalised). `columns` are
+    /// the column NAMES the chief reads off to choose a field→type
+    /// mapping; `sample-rows` are example values. `item-ref` is the
+    /// source item the host resolved + sampled (informational — the
+    /// host picks a CSV preferentially, else the first listed file).
+    /// Inferred type for one column, returned alongside the raw sample so the
+    /// chief can offer a typed mapping instead of guessing. Empty for probes
+    /// that do not infer types (e.g. the file-based sample-source fallback).
+    record column-type {
+        column: string,
+        ty: string,
+        reason: string,
+        // The column's declared/observed closed value set — a SharePoint
+        // Choice's options, or the distinct values an `enum` inference
+        // saw. Empty when the column is not enum-shaped. This is what
+        // lets the offer say "`Status` (Choice: offen/bezahlt)" instead
+        // of a bare `enum` (ADR-0152 D5's semantic hints).
+        enum-values: list<string>,
+        // For a lookup/reference-shaped column: the declared target the
+        // source points at (a SharePoint Lookup's list id). Empty
+        // otherwise.
+        lookup-target: string,
+    }
+
+    record source-sample {
+        item-ref: string,
+        columns: list<string>,
+        sample-rows: list<list<string>>,
+        // Inferred closed `ty` per column (`text|int|float|boolean|decimal|date|json|enum`).
+        // Empty when the probe path does not infer types.
+        column-types: list<column-type>,
+        // The canonical format the host resolved for the sampled item
+        // (`csv` | `json` | `records` | …), via the boundary `content-type` hint +
+        // a byte sniff of the head (sniff wins on conflict). Informational
+        // for the chief; the host already picked the matching adapter.
+        format: string,
+        // The structured-door adapter verbs the host RESOLVED for this
+        // source's format (`csv-sample`/`csv-decode`, `json-sample`/
+        // `json-decode`, …). The chief copies these verbatim into the
+        // Intake-Run's `adapter`, so the async runner decodes with the
+        // SAME adapter the probe sampled with — one format, one adapter,
+        // regardless of origin. Empty only when the probe pre-dates this
+        // field (the chief then falls back to the csv convention default) or
+        // the probe is records-shaped and needs no adapter.
+        sample-verb: string,
+        decode-verb: string,
+    }
+
+    /// Phase-1 synchronous probe of `source-ref`. The host resolves the
+    /// connector by the source-ref scheme (a path → folder-connector read
+    /// IN PLACE via host-source; a URL → web-connector fetched to a blob),
+    /// enumerates, picks a structured item, sniffs its canonical FORMAT
+    /// (content-type hint + head-byte sniff, sniff wins), and runs the
+    /// RESOLVED format adapter's sample. Returns the raw columns + sample
+    /// rows + the resolved format/adapter verbs for schema inference, or an
+    /// error string (empty source, a document-door format with no
+    /// sample/decode contract, adapter failure).
+    sample-source: func(source-ref: string) -> result<source-sample, string>;
+
+    /// Probe a records-capable source. If the connector advertises a typed
+    /// `<scheme>-describe-schema` tool, it is preferred and its declared column
+    /// names + types are returned directly; otherwise the probe falls back to
+    /// enumerate(manifest:true), uses the first items' fields keys as columns,
+    /// infers a closed ty per column, and returns the same source-sample shape
+    /// as sample-source.
+    records-source: func(source-ref: string) -> result<source-sample, string>;
+
+    /// One mapped preview row: the composed business key + the record JSON
+    /// `map_row` would hand to ingest.
+    record preview-row {
+        key: string,
+        value-json: string,
+    }
+
+    /// ADR-0152 D10 — the mapped preview: sample rows of a source run through
+    /// a PROPOSED mapping, exactly as ingest would map them (the SAME `map_row`,
+    /// over adapter-DECODED rows where the source is a file). Nothing is
+    /// ingested or persisted.
+    record mapping-preview {
+        item-ref: string,
+        format: string,
+        records: list<preview-row>,
+        /// Per-row map failures — the exact error strings ingest would
+        /// produce (missing column, ragged row, bad coercion).
+        errors: list<string>,
+        /// Set when the preview had to fall back to RAW (un-normalised)
+        /// sample values — the caller tells the operator formats are
+        /// normalised at ingest.
+        note: option<string>,
+    }
+
+    /// Map up to `limit` (default 3) sample rows of `source-ref` through the
+    /// proposed mapping. `mapping-json` is a JSON array of
+    /// `{column, field, ty, value?}` — the same shape the chief passes to
+    /// `intake_source`.
+    preview-mapping: func(source-ref: string, mapping-json: string, key: list<string>, limit: option<u32>) -> result<mapping-preview, string>;
+}

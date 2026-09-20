@@ -1,0 +1,19 @@
+{
+  "slug": "hash-embed",
+  "version": "0.1.0",
+  "source": {
+    "type": "local",
+    "path": "hash-embed-0.1.0.wasm"
+  },
+  "wasm_filename": "hash-embed-0.1.0.wasm",
+  "trust": {
+    "tier": "community"
+  },
+  "provides": [
+    "wild:embed-adapter@0.1.0"
+  ],
+  "capability_bundles": [],
+  "config_keys": [],
+  "secret_aliases": [],
+  "default_pool_size": 1
+}

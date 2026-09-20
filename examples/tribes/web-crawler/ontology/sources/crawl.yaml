@@ -1,0 +1,52 @@
+# ADR-0114 — the queue-fed intake source: the crawl work queue drained
+# through the unchanged pipeline.
+#
+# `wild tribe apply` upserts this into the tribe's `intake_source`
+# registry; the scheduler reads it live. Each fire enumerates the
+# queue's `status = pending` rows (bounded by `limit`) through the
+# generic `queue-enumerate` connector, fetches each URL through
+# `url-fetch` (the ADR-0114 D3 EXPLICIT verb pair — any protocol's
+# fetch pairs with the one queue enumerator), and the host flips each
+# completed row `pending → done` at the intake-result seam (D6), so the
+# next fire re-fetches nothing.
+#
+# Governance is the fetch side's own, unchanged: the egress allowlist
+# is the crawl boundary — an enqueued off-allowlist link's fetch is
+# DENIED + audited, the run continues.
+slug: crawl
+# ADR-0114 D11 — `max_depth=2` is the DECLARED frontier ceiling: a row
+# whose `depth` exceeds it is rejected at the drain (dead-lettered +
+# flipped `failed`), so the budget holds even if a producer misbehaves.
+# The frontier worker still stops enqueueing at the same ceiling — the
+# producer discipline keeps the queue clean; the locator is the floor.
+locator: "queue://crawl_queue?ref=url&limit=200&max_depth=2"
+target_type: page
+
+# The ADR-0114 D3 explicit verb pair: the protocol-blind queue
+# enumerator + the web fetch — the DEFAULT fetch for this queue's items.
+# A mixed-protocol item set no longer needs N queue sources: the host
+# stamps the deployed per-scheme connector map onto each queue dispatch
+# and the runner resolves the fetch verb PER ITEM by the ref's URI
+# scheme (ADR-0114 D8); scheme-less/unknown refs keep this default.
+connector:
+  enumerate: queue-enumerate
+  fetch: url-fetch
+
+# Fetched pages are `text/html`, which routes through the DOCUMENT door
+# (the ADR-0114 first-instance interim — see the tribe README); the
+# structured adapter verbs are therefore not exercised on this source.
+adapter:
+  sample: ""
+  decode: ""
+
+# ADR-0114 D4 — the queue IS the payload: every committed queue write
+# fires a drain (the payload-discarding on-event re-fire is exactly
+# right — the run enumerates `pending` and sees the row that triggered
+# it; the per-source overlap mark coalesces write bursts), and the
+# interval sweep bounds staleness if an event fires into a shedding
+# window.
+trigger:
+  - kind: on-event
+    subject: "wild.{tribe}.data.crawl_queue.*"
+  - kind: interval
+    seconds: 900

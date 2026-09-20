@@ -1,0 +1,13 @@
+flowchart TB
+    subgraph tier1["Tier-1 — native"]
+        Native["Rust, compiled into wild-hostd<br/>(messaging · secrets · files · forge)"]
+    end
+    subgraph tier15["Tier-1.5 — embedded"]
+        Chief["Wasm bundled inside the binary<br/>(the default Chief)"]
+    end
+    subgraph tier2["Tier-2 — installed"]
+        Installed["Wasm pulled from a registry<br/>(adapters · tools · workers · widgets)"]
+    end
+    Native --> Host["your running Wild"]
+    Chief --> Host
+    Installed -- "wild plugin add ·<br/>signature checked" --> Host

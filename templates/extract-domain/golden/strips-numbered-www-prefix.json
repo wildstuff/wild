@@ -1,0 +1,10 @@
+{
+  "tool": "extract_domain",
+  "input": {
+    "url": "http://www2.bbc.co.uk/news"
+  },
+  "expected": {
+    "domain": "bbc.co.uk"
+  },
+  "match": "exact"
+}

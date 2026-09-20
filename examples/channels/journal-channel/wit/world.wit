@@ -1,0 +1,42 @@
+// `journal-channel` — the minimal CHANNEL-flavor (transport-axis) Tier-2
+// plugin.
+//
+// The teaching example for the operator-channel contract (ADR-0044): it
+// EXPORTS `wild:operator-channel/channel`, so the host is the CONSUMER —
+// when an escalation opens anywhere, the host's operator notifier fans out
+// to this channel's `deliver()`. This is the INVERSE of a tool-provider
+// plugin (guest exports, host calls) — see `wit/operator-channel/
+// operator-channel.wit` for the direction note.
+//
+// Instead of pushing to an external service (the real reference is
+// `plugins/channels/telegram-channel/` in the development repository, which
+// needs a bot token and an egress grant), this channel JOURNALS every
+// delivered notification as one bus event — the wake→deliver shape with a
+// sink any reader can inspect from `wild watch`'s Bus pane or `nats sub`,
+// with no account and no token.
+//
+// Shape:
+//
+//   - `include wild:plugin-meta/plugin-base` — every Tier-2 plugin exports
+//     the three lifecycle calls (`manifest`, `init`, `shutdown`); the host
+//     cross-checks `manifest()` against the sidecar at load time.
+//   - `export wild:operator-channel/channel` — `deliver()` (once per
+//     fanned-out notification) + `capabilities()` (host-polled once, at
+//     shim construction).
+//   - `import wild:messaging/consumer` — the journal sink: one
+//     fire-and-forget publish per delivery. The one capability this
+//     channel needs; it is open at the `community` trust tier, so no
+//     grant command is required.
+
+package wildstuff:journal-channel@0.1.0;
+
+world journal-channel {
+    // ── Plugin contract — lifecycle (manifest / init / shutdown) ──
+    include wild:plugin-meta/plugin-base@0.3.0;
+
+    // ── Messaging: publish the journal event ──
+    import wild:messaging/consumer@0.3.0;
+
+    // ── Operator-channel surface (host is the consumer) ──
+    export wild:operator-channel/channel@0.1.0;
+}

@@ -1,0 +1,22 @@
+// `overlap-rerank` — deterministic teaching adapter for the Tier-2
+// rerank-adapter contract.
+//
+// Composes `wild:rerank-adapter/rerank-adapter-plugin@0.1.0` verbatim —
+// the same world the shipping `llama-rerank` adapter builds on. The
+// include inherits:
+//
+//   - `wild:plugin-meta/plugin-base@0.3.0` — the meta lifecycle
+//     (`manifest` / `init` / `shutdown`) every Tier-2 plugin exports.
+//   - `import wild:secrets/store@0.1.0` and
+//     `import wild:http/outbound@0.1.0` — the typical rerank-adapter
+//     imports (api-key + the governed egress call). This sample calls
+//     NEITHER (no network, no secrets); wit-bindgen tree-shakes
+//     uncalled imports out of the built component, so the binary
+//     imports nothing.
+//   - `export rerank` — `info()` (the capability profile) and the
+//     single one-shot `rerank()` call. Rerank has no streaming sibling.
+package wildstuff:overlap-rerank@0.1.0;
+
+world overlap-rerank {
+    include wild:rerank-adapter/rerank-adapter-plugin@0.1.0;
+}

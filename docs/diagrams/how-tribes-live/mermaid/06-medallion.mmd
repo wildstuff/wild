@@ -1,0 +1,14 @@
+flowchart LR
+    subgraph Bronze["🥉 Bronze — raw"]
+        direction TB
+        Src["A CSV / a feed /<br/>a scraped page"] --> Mirror["Exact mirror<br/>of the source.<br/>Nothing cleaned."]
+    end
+    subgraph Silver["🥈 Silver — normalised"]
+        direction TB
+        Norm["One canonical row<br/>per real entity.<br/>“Müller GmbH” =<br/>“Mueller G.m.b.H.”"]
+    end
+    subgraph Gold["🥇 Gold — derived"]
+        direction TB
+        View["Exact answers:<br/>‘price change by product,<br/>last 30 days’"]
+    end
+    Bronze --> Silver --> Gold

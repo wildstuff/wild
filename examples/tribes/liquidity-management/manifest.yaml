@@ -1,0 +1,87 @@
+# `wild tribe apply <bundle> --as <id>` reads this. Schema:
+# `crates/runtime/shared/src/bundle.rs::BundleManifest`.
+#
+# ── THE DDD LANE (ADR-0108) ──────────────────────────────────────────────
+# The DOMAIN-MODEL-FIRST reference tribe. The liquidity domain (§17 InsO,
+# 13-week forecast, gated payment + dunning verbs), authored the DDD way: the
+# ONE `ontology/model.yaml` is the tribe's constitution, and `wild tribe apply`
+# COMPILES it — deterministically, no translation — into the full ontology
+# (value types + `verbs` + `functions` + `sources`). The compile shape is
+# locked by the compiler tests in `wild-ddd`.
+#
+# The `authoring_method: ddd` key below is the switch: it routes apply through
+# `compile_ddd_source(ontology/model.yaml)` (parse + cross-layer gate BEFORE any
+# side effect), persists the model as the tribe's source of record, stamps the
+# tribe `ddd` in its `meta.yaml`, and strips any hand-authored ontology (the
+# model owns it). Omit the key (or set `legacy`) to route apply through the
+# hand-authored loader instead.
+schema_version: "1"
+
+name: liquidity-management
+
+# ADR-0118 — declared domain membership: this tribe and the minimal
+# `reporting` sibling bundle together form the two-tribe `finanzen`
+# domain (the ADR-0194 domain-context fixture). The deploy seam stamps
+# the value into `meta.yaml::domain`; the registry mirrors it.
+domain: finanzen
+
+# THE SWITCH. `ddd` → the domain-model compile lane; absent/`legacy` → the
+# hand-authored loader. Bundle content wins over the profile stance for an
+# explicit `tribe apply` (a portable artifact), so this bundle deploys the DDD
+# way on any profile.
+authoring_method: ddd
+
+# ADR-0157 D4.4 — the feature-token marker: the model declares an `aging:`
+# rule (time-driven state), so a runtime without the aging lane must REFUSE
+# this bundle instead of silently ageing nothing (an old daemon tolerates
+# unknown model keys and would apply the bundle minus the behaviour it
+# depends on). An open token list, never a version number.
+requires: ["aging"]
+
+description: >
+  A liquidity manager that guards against §17 InsO (illiquidity, German Insolvency Code),
+  authored as a DDD domain model. It maintains a live cash view across accounts,
+  tracks receivables + payables, computes DSO/DPO/liquidity grades, keeps a
+  rolling 13-week forecast, and drives the gated payment + dunning verbs. The
+  whole ontology — value objects, functions, aggregates + lifecycles, the CQRS
+  debtor projection, and the ACL source bindings — is compiled from the single
+  `ontology/model.yaml`. Structured feeds ingest deterministically; inbound
+  invoice PDFs extract through the document door.
+
+# Top-level tribe under the Elder.
+parent_tribe: root
+
+# Daily reflection at 18:00 — the chief summarises the day's cash position
+# (inflows vs. outflows, the 13-week coverage gap, cash-discount windows at risk) and
+# flags drift. The RECURRING data feeds are Chief-free `intake_source` records —
+# in the DDD lane they are the model's Layer-B `sources:` bindings, compiled to
+# the `intake_source` registry — so the chief does NOT wake per-feed; it wakes
+# to reflect and to act.
+schedule_reflect: "0 18 * * *"
+
+# No `default_model:` — the chief routes to your configured default LLM adapter
+# at dispatch, so this bundle applies cleanly regardless of LLM setup.
+
+# Three GENERIC ai-workers, configured by prompt + tool grant (no core code) —
+# all wired by the model's `processes:` section (ADR-0118 D14), not by hand:
+#   - dunning-notifier — the JUDGEMENT + v1-fallback step of the model's
+#     `dunning-escalation` process. Since the ADR-0124 proof point the routine
+#     notice is delivered DETERMINISTICALLY by the flow itself (lookup →
+#     template → telegram-send + the ADR-0127 `on_done` status write — no
+#     LLM); this worker gets the out-of-scale (`level > 3`) judgement edge,
+#     and a runtime without the multi-stage walk falls back to it for every
+#     new dunning. It is ALSO the outbound mechanism of the `dunning-notice`
+#     offer process. A live send needs a Telegram bot token + the egress
+#     channel binding (see ADR-0098).
+#   - receivables-chaser — raises the first-level dunning that starts the chain
+#     above. Dispatched REACTIVELY by the model's `receivables-overdue`
+#     process: the daily aging tick (ADR-0157) writes `aging_state:
+#     overdue`, and the chase fires on that write — "turns overdue" is time,
+#     and time is now a WRITE. The blueprint's `receivables-chased` judge
+#     (ADR-0049) stays as the agentic BACKSTOP over this deterministic lane.
+#     Atlas tools only, no egress → it completes with no secret required.
+#     (The `invoice-dual-check` triage is a `does: decide` rule step now — logic,
+#     not a worker — so it is not listed here; see ADR-0144.)
+workers:
+  - ref: workers/dunning-notifier.md
+  - ref: workers/receivables-chaser.md

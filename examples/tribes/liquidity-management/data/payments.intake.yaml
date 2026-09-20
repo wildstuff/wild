@@ -1,0 +1,13 @@
+# Intake mapping for the payments seed.
+# `payment` is key_strategy: uuid (autokey), the same shape as
+# `payment_promise`: the seed rows carry an explicit `id` (promoted on Upsert)
+# so the money verbs have stable targets to be invoked against, while a
+# `schedule_payment` at runtime omits the id and the store mints one.
+#
+# The seed spans the whole lifecycle — two `executed` payments that match the
+# settled payables (and their bank debits), one `approved` awaiting execution,
+# two `planned` — so `approve_payment` and `pay_invoice` have a record in the
+# state their `requires_state` guard demands, instead of refusing on an empty set.
+target_type: payment
+key: [id]
+columns: [id, invoice_id, partner_id, account_iban, amount, scheduled_date, executed_date, method, status]

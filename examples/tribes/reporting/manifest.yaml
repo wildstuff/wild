@@ -1,0 +1,32 @@
+# `wild tribe apply <bundle-dir>` reads this file. Schema lives in
+# `crates/runtime/wild-tribe-ops/src/bundle.rs::BundleManifest`.
+#
+# The MINIMAL DOMAIN-SIBLING reference tribe (ADR-0194): together with
+# `liquidity-management` it forms the two-tribe `finanzen` domain — the
+# fixture that proves the Elder's domain-context grounding ("which area
+# of the domain does the reporting?" is answerable from grounding, not
+# from a tribe-by-tribe pull). It advertises ONE capability offer
+# (`cash-report`, derived from the spec frontmatter in
+# `specs/cash-report.md`) and carries no workers — the smallest tribe
+# that still shows up meaningfully in its domain's roster.
+schema_version: "1"
+
+name: reporting
+
+# ADR-0118 — declared domain membership. The deploy seam stamps this
+# into the tribe's `meta.yaml::domain`; the registry reconciler mirrors
+# it into `tribe-registry`, where domain siblings discover each other.
+domain: finanzen
+
+description: >
+  Financial reporting area of the `finanzen` domain: produces the
+  recurring cash reports and evaluations over the numbers its sibling
+  `liquidity-management` maintains. Deliberately minimal — a
+  fork-starter for "what does a domain sibling look like?".
+
+# Top-level tribe under the Elder, like its liquidity sibling.
+parent_tribe: root
+
+# No workers, no schedule — this fixture exists for its domain
+# membership + capability offer, not for autonomous work.
+workers: []

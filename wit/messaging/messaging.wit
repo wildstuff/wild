@@ -1,0 +1,56 @@
+// `wild:messaging` — wild-native host-mediated pub/sub for workloads.
+//
+// Two halves: `handler` (the host wakes the component once per
+// delivered message) + `consumer.publish` (fire-and-forget send onto
+// the host's `async-nats` connection). Subjects pass through verbatim.
+//
+// Tenant scoping (PLANNED): today the host enforces a `wild.{tribe}.`
+// subject ACL on every call. The transparent `wild.tenant.<tribe-id>.`
+// prefix injection that would make scoping invisible to the guest is
+// NOT built yet.
+
+package wild:messaging@0.3.0;
+
+// Types common to message broker interactions.
+interface types {
+    // A message sent to or received from a broker.
+    record broker-message {
+        // Subject the message was published to (or that should be
+        // subscribed to). Plain string today; tenant scoping (planned)
+        // would layer on top transparently.
+        subject: string,
+        // Opaque body. Encoding is up to the producer + consumer
+        // (JSON / protobuf / etc.) — the host does not interpret.
+        body: list<u8>,
+        // Message headers as ordered key/value pairs (@0.3.0).
+        //
+        // ON DELIVERY (handler): the host populates these from the NATS
+        // message's headers — including the host-asserted `wild-actor` /
+        // `wild-originator` identity and any trace context — so a guest
+        // can see WHO/WHAT triggered it and propagate the trace forward.
+        //
+        // ON PUBLISH (consumer): the guest MAY set headers to carry trace
+        // context onto the outbound message. The host MERGES them with the
+        // identity it stamps itself — the host-asserted `wild-actor` /
+        // `wild-originator` keys ALWAYS win and cannot be forged by the
+        // guest. Leave empty (`[]`) for no headers.
+        headers: list<tuple<string, string>>,
+    }
+}
+
+// Components implement this to receive messages routed by the host.
+interface handler {
+    use types.{broker-message};
+
+    // Invoked once per delivered message. `Err(msg)` is logged by
+    // the host and (per default) NACKs the delivery.
+    handle-message: func(msg: broker-message) -> result<_, string>;
+}
+
+// Components import this to publish via the broker.
+interface consumer {
+    use types.{broker-message};
+
+    // Fire-and-forget publish.
+    publish: func(msg: broker-message) -> result<_, string>;
+}

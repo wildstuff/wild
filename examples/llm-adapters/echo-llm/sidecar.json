@@ -1,0 +1,28 @@
+{
+  "slug": "echo-llm",
+  "version": "0.1.0",
+  "source": {
+    "type": "local",
+    "path": "echo-llm-0.1.0.wasm"
+  },
+  "wasm_filename": "echo-llm-0.1.0.wasm",
+  "trust": {
+    "tier": "community"
+  },
+  "provides": [
+    "wild:llm-adapter@0.3.0"
+  ],
+  "capability_bundles": [],
+  "config_keys": [],
+  "secret_aliases": [],
+  "default_pool_size": 1,
+  "capabilities": {
+    "tool_use": false,
+    "vision": false,
+    "prompt_caching": false,
+    "thinking": false,
+    "sessions": false,
+    "structured_output": false,
+    "max_context_tokens": 0
+  }
+}
