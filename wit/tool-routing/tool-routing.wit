@@ -1,0 +1,71 @@
+// `wild:tool-routing` — a NARROW, purpose-specific host surface that
+// lets a deterministic chief cycle invoke a single tool-provider tool
+// SYNCHRONOUSLY, host-mediated, audited — no NATS, no worker lifecycle.
+//
+// Heritage: P5c (2026-06-11). This is the dispatch-side twin of
+// `wild:source-probe/sample`. A tool-provider (provider-flavor) component
+// exports `wild:tool-provider/tools` and deliberately has NO
+// `wild:messaging/handler`: per `docs/plugin-concept.md` a provider
+// "returns a single value to a synchronous caller", so it is meant to
+// be reached through the host's `ToolProviderRegistry`, not woken as a
+// NATS worker. Before P5c the ADR-0039 schedule recipe dispatched such
+// a worker over `wild.{tribe}.worker.{name}.task` — which died with
+// "component lacks expected handler export". This verb closes that gap:
+// the chief's deterministic dispatch path calls `invoke` and gets the
+// tool result back IN THE SAME CYCLE.
+//
+// Design rule (mirrors `wild:intake`): the chief imports ONLY this one
+// narrow `invoke` verb, NEVER the generic `wild:tools/invoke`. The chief
+// stays a coordinator that routes a KNOWN migrated worker-name to its
+// primary tool — it never becomes a generic tool-caller driving an
+// arbitrary catalog. See `chief.wit` near the import for the rationale,
+// and `docs/plugin-concept.md` for the provider-vs-workload flavor
+// discriminator.
+//
+// The `tool-result` + `tool-error` records are field-identical to
+// `wild:tools/invoke`'s versions on purpose — the host serves both from
+// the SAME `WildToolsPlugin` over the SAME `LiveToolProviderRegistry`,
+// so the dispatch mechanics (and the effect-gate audit) are shared. The
+// difference is purely the trust surface: this verb is granted to the
+// chief, the generic `wild:tools/invoke` is not.
+
+package wild:tool-routing@0.1.0;
+
+interface invoke {
+    /// Successful invocation result. Identical shape to
+    /// `wild:tools/invoke.tool-result`.
+    record tool-result {
+        json-output: string,
+        cost-units: option<u64>,
+    }
+
+    /// Typed failure modes. Same five-arm shape as
+    /// `wild:tools/invoke.tool-error`.
+    variant tool-error {
+        /// `tool-name` doesn't match any registered tool (stale
+        /// catalog or a removed plugin).
+        unknown-tool(string),
+        /// `args-json` doesn't match the tool's json-schema.
+        invalid-args(string),
+        /// Tool ran but its work failed (network, missing secret, …).
+        execution-failed(string),
+        /// Host-enforced timeout on the WIT call.
+        timeout,
+        /// Caller's trust tier doesn't grant invoke access to this tool.
+        not-granted(string),
+    }
+
+    /// Dispatch a tool-provider tool by name, synchronously. The host's
+    /// `ToolProviderRegistry` looks up the providing plugin, routes
+    /// through the shared effect-gate (auto-admitted routine `ToolInvoke`,
+    /// audited), acquires a pool member, calls the plugin's
+    /// `wild:tool-provider/tools.invoke`, and returns the result INLINE.
+    invoke: func(tool-name: string, args-json: string) -> result<tool-result, tool-error>;
+}
+
+/// `tool-routing-host` — the world a wasm consumer (the chief) imports
+/// to reach the host's synchronous tool-provider dispatch. Mirrors the
+/// `*-host` shape every other wild plugin world uses.
+world tool-routing-host {
+    import invoke;
+}

@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#0b1220" flood-opacity="0.07"/>
+    </filter>
+    <marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 0 0.8 L 7 4 L 0 7.2" fill="none" stroke="#8c959f" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <rect x="2" y="2" width="1196" height="416" rx="20" fill="#ffffff" stroke="#d0d7de"/>
+
+  <!-- 1 ingest -->
+  <text x="70" y="76" font-size="12" font-weight="700" fill="#8c959f" letter-spacing="1.4">① INGEST</text>
+  <g filter="url(#soft)">
+    <rect x="70" y="96" width="230" height="180" rx="14" fill="#ffffff" stroke="#d0d7de"/>
+  </g>
+  <g fill="none" stroke="#57606a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 100 128 h 11 l 4 5 h 17 a 3.5 3.5 0 0 1 3.5 3.5 v 17 a 3.5 3.5 0 0 1 -3.5 3.5 h -32 a 3.5 3.5 0 0 1 -3.5 -3.5 v -22 a 3.5 3.5 0 0 1 3.5 -3.5 z"/>
+    <rect x="100" y="176" width="36" height="26" rx="3.5"/>
+    <path d="M 102 179 L 118 192 L 134 179"/>
+  </g>
+  <text x="152" y="146" font-size="13.5" font-weight="600" fill="#1f2328">Sources</text>
+  <text x="152" y="164" font-size="11.5" fill="#57606a">folder · mailbox · web</text>
+  <text x="152" y="196" font-size="11.5" fill="#57606a">files come in, records</text>
+  <text x="152" y="212" font-size="11.5" fill="#57606a">come out — on schedule,</text>
+  <text x="152" y="228" font-size="11.5" fill="#57606a">no one asked</text>
+  <text x="100" y="256" font-size="11.5" fill="#007aff">every record keeps its source</text>
+
+  <path d="M 300 186 L 352 186" stroke="#8c959f" stroke-width="1.4" marker-end="url(#a)"/>
+
+  <!-- 2 entities -->
+  <text x="362" y="76" font-size="12" font-weight="700" fill="#8c959f" letter-spacing="1.4">② ENTITIES &amp; RELATIONS</text>
+  <g filter="url(#soft)">
+    <rect x="362" y="96" width="330" height="180" rx="14" fill="#fbfdff" stroke="#c9ddf5"/>
+  </g>
+  <g filter="url(#soft)">
+    <rect x="390" y="128" width="112" height="38" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+    <rect x="552" y="128" width="112" height="38" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+    <rect x="470" y="206" width="112" height="38" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+  </g>
+  <line x1="502" y1="147" x2="552" y2="147" stroke="#b6c8dd" stroke-width="1.6"/>
+  <line x1="480" y1="166" x2="512" y2="206" stroke="#b6c8dd" stroke-width="1.6"/>
+  <line x1="590" y1="166" x2="548" y2="206" stroke="#b6c8dd" stroke-width="1.6"/>
+  <text x="446" y="151" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">Invoice</text>
+  <text x="608" y="151" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">Partner</text>
+  <text x="526" y="229" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">Payment</text>
+  <text x="390" y="262" font-size="11.5" fill="#007aff">connected things — answers become arithmetic</text>
+
+  <path d="M 692 186 L 744 186" stroke="#8c959f" stroke-width="1.4" marker-end="url(#a)"/>
+
+  <!-- 3 effects -->
+  <text x="754" y="76" font-size="12" font-weight="700" fill="#8c959f" letter-spacing="1.4">③ EFFECTS</text>
+  <g filter="url(#soft)">
+    <rect x="754" y="96" width="230" height="180" rx="14" fill="#ffffff" stroke="#d0d7de"/>
+  </g>
+  <g filter="url(#soft)">
+    <rect x="782" y="130" width="174" height="40" rx="20" fill="#eef6ff" stroke="#c9ddf5"/>
+    <rect x="782" y="184" width="174" height="40" rx="20" fill="#fff9f2" stroke="#ffd9a8"/>
+  </g>
+  <text x="869" y="155" text-anchor="middle" font-size="13" font-weight="600" fill="#0a5dc2">Send reminder</text>
+  <text x="869" y="209" text-anchor="middle" font-size="13" font-weight="600" fill="#c25e00">Pay invoice 🔒</text>
+  <text x="782" y="252" font-size="11.5" fill="#57606a">actions on the world — each</text>
+  <text x="782" y="268" font-size="11.5" fill="#57606a">with a risk tier and an audit trail</text>
+
+  <!-- 4 workers above, acting -->
+  <text x="1014" y="76" font-size="12" font-weight="700" fill="#8c959f" letter-spacing="1.4">④ WORKERS</text>
+  <g fill="none" stroke="#34c759" stroke-width="1.8">
+    <circle cx="1060" cy="140" r="22" fill="#f2fbf5"/>
+    <circle cx="1110" cy="170" r="15" fill="#f2fbf5"/>
+  </g>
+  <path d="M 1038 156 C 1010 172, 990 166, 962 158" stroke="#34c759" stroke-width="1.5" fill="none" marker-end="url(#a)"/>
+  <text x="1022" y="214" font-size="11.5" fill="#57606a">the ones who act:</text>
+  <text x="1022" y="230" font-size="11.5" fill="#57606a">read the graph, press</text>
+  <text x="1022" y="246" font-size="11.5" fill="#57606a">the allowed buttons —</text>
+  <text x="1022" y="262" font-size="11.5" fill="#57606a">never past the locks</text>
+
+  <!-- ground note -->
+  <line x1="70" y1="316" x2="1130" y2="316" stroke="#e3e9f0" stroke-width="1.5"/>
+  <text x="600" y="352" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1f2328">The ontology is the plan of all four: what comes in, what exists, what may be done — and by whom.</text>
+  <text x="600" y="378" text-anchor="middle" font-size="12.5" fill="#8c959f">You author it by talking to Elder. Everything else — tables, tools, apps, dashboards — is derived from it.</text>
+</svg>

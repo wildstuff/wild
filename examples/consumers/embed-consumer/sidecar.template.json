@@ -1,0 +1,22 @@
+{
+  "slug": "embed-consumer",
+  "version": "0.1.0",
+  "source": {
+    "type": "local",
+    "path": "embed-consumer-0.1.0.wasm"
+  },
+  "wasm_filename": "embed-consumer-0.1.0.wasm",
+  "trust": {
+    "tier": "community"
+  },
+  "provides": [
+    "wild:messaging/handler@0.3.0"
+  ],
+  "capability_bundles": [
+    "worker.bus.basic"
+  ],
+  "wake_up": {
+    "type": "messaging-handler",
+    "subscription_template": "wild.{tribe}.embed.req"
+  }
+}

@@ -1,0 +1,81 @@
+# Atlas ontology for the web-crawler tribe.
+#
+# Two types, both instances of shipped platform contracts:
+#
+#   - crawl_queue — a DOMAIN-AUTHORED work queue (ADR-0114 D1): the ref
+#     field (`url`) is the record KEY (re-enqueueing a known URL is an
+#     idempotent upsert, never a duplicate fetch), `status` is the closed
+#     work-set vocabulary the enumerator + the host completion flip
+#     depend on, everything else is open domain payload the enumerator
+#     never reads. The born-with `work_item` template is the starting
+#     shape this copies from; the extra fields (`source`, `parent_url`)
+#     are why a domain authors its own queue type.
+#   - page — the crawl's target type. Until the deterministic html
+#     format-adapter lands (see the tribe README — gated on the
+#     ADR-0112 door-authority collapse), fetched pages route through the
+#     DOCUMENT door (LLM extraction), which fills these fields from the
+#     page content; `links` carries the discovered follow-up URLs the
+#     frontier worker feeds back into the queue (ADR-0114 D5).
+
+types:
+  - slug: crawl_queue
+    name: Crawl Queue Item
+    plural: Crawl Queue Items
+    description: >
+      One URL of the crawl work queue (an ADR-0114 D1 work-queue
+      instance). `pending` rows are drained by the queue-fed intake
+      source; the host flips a drained row `done` when its fetch+ingest
+      completes.
+    write_authority: authored
+    key: [url]
+    fields:
+      - name: url
+        type: text
+        required: true
+      - name: status
+        type: enum
+        required: true
+        enum_values: [pending, done, failed]
+        openness: closed
+        rationale: >
+          The ADR-0114 D1 work-set vocabulary — the queue-enumerate
+          connector and the host completion seam depend on these
+          semantics; extending the set is a contract change.
+      - name: depth
+        type: int
+        description: >
+          Frontier budget — how many link-hops from a seed this URL is.
+          The frontier worker stops enqueueing past the declared
+          ceiling, and the drain enforces the same ceiling declaratively
+          (the locator's `max_depth=`, ADR-0114 D11 — an over-budget row
+          is rejected at enumerate, dead-lettered, and flipped `failed`).
+      - name: source
+        type: text
+        description: "How the row got here: seed | event | frontier."
+      - name: parent_url
+        type: text
+        description: The page whose link discovered this URL.
+
+  - slug: page
+    name: Crawled Page
+    plural: Crawled Pages
+    description: >
+      One crawled web page: title, readable content, and the outbound
+      links the frontier worker filters into new crawl_queue rows.
+    write_authority: source_mirror
+    key: [url]
+    fields:
+      - name: url
+        type: text
+        required: true
+      - name: title
+        type: text
+      - name: content
+        type: text
+      - name: links
+        type: json
+        description: >
+          Discovered outbound links (a JSON array of absolute URLs) —
+          the feedback field the frontier trigger reads (ADR-0114 D5;
+          one extractor emits rows of ONE type, so follow-up refs ride
+          an ordinary field, never a second row type).

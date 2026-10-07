@@ -1,0 +1,34 @@
+// `wild:function` — installable function-backing primitive.
+//
+// A plugin that exports `wild:function/backing` registers named backings that
+// Atlas can bind to `FunctionDef`s. This is the natural generalisation of the
+// existing `tool` backing: instead of pointing at a global tool name, a function
+// points at a plugin-provided backing with a typed discovery interface.
+
+package wild:function@0.1.0;
+
+interface backing {
+    record backing-spec {
+        name: string,
+        description: string,
+        // JSON Schema text for the arguments this backing expects.
+        input-schema: string,
+        // JSON Schema text for the JSON string the backing returns.
+        output-schema: string,
+    }
+
+    variant function-error {
+        unknown-backing(string),
+        invalid-args(string),
+        execution-failed(string),
+    }
+
+    // Discover backings provided by this plugin. Called once at plugin-load
+    // time so the host can populate the FunctionRegistry.
+    list-backings: func() -> list<backing-spec>;
+
+    // Invoke a named backing. `args-json` must validate against the backing's
+    // declared `input-schema`; on success the returned string validates against
+    // `output-schema`.
+    invoke: func(name: string, args-json: string) -> result<string, function-error>;
+}

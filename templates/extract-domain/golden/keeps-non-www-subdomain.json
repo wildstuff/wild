@@ -1,0 +1,10 @@
+{
+  "tool": "extract_domain",
+  "input": {
+    "url": "https://api.github.com/repos"
+  },
+  "expected": {
+    "domain": "api.github.com"
+  },
+  "match": "exact"
+}

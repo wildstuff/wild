@@ -1,0 +1,4 @@
+id,invoice_id,promised_date,promised_amount,status,note
+PROM-SEED-001,RE-2026-0032,2026-08-07,7400.00,open,Payment promised once the end customer pays
+PROM-SEED-002,RE-2026-0037,2026-08-14,4100.00,open,Requested instalment payment in two tranches
+PROM-SEED-003,RE-2026-0035,2026-07-20,11500.00,open,Promised for 20 July - the date has passed and the aging tick breaks it

@@ -1,0 +1,6 @@
+package wildstuff:extract-domain@0.1.0;
+
+world extract-domain {
+    include wild:plugin-meta/plugin-base@0.3.0;
+    export wild:tool-provider/tools@0.4.0;
+}

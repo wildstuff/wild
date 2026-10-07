@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 380" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#0b1220" flood-opacity="0.07"/>
+    </filter>
+  </defs>
+  <rect x="2" y="2" width="1096" height="376" rx="20" fill="#ffffff" stroke="#d0d7de"/>
+
+  <!-- the ledger of events -->
+  <text x="550" y="52" text-anchor="middle" font-size="12" font-weight="700" fill="#8c959f" letter-spacing="1.6">WHAT THE DESK LEARNED, IN ORDER — NOTHING OVERWRITTEN</text>
+  <line x1="120" y1="92" x2="980" y2="92" stroke="#e3e9f0" stroke-width="2"/>
+  <g fill="#b6c8dd">
+    <circle cx="190" cy="92" r="4"/><circle cx="260" cy="92" r="4"/><circle cx="330" cy="92" r="4"/><circle cx="400" cy="92" r="4"/>
+  </g>
+  <circle cx="580" cy="92" r="6" fill="#007aff"/>
+  <circle cx="820" cy="92" r="4" fill="#b6c8dd"/>
+  <text x="295" y="118" text-anchor="middle" font-size="12.5" fill="#57606a">April — invoices, bank movements</text>
+  <text x="580" y="70" text-anchor="middle" font-size="12.5" font-weight="600" fill="#007aff">May 5 — a LATE invoice arrives (issued Apr 10)</text>
+  <text x="820" y="118" text-anchor="middle" font-size="12.5" fill="#57606a">June — a correction</text>
+
+  <!-- two questions -->
+  <g filter="url(#soft)">
+    <rect x="92" y="164" width="428" height="150" rx="16" fill="#ffffff" stroke="#d0d7de"/>
+    <rect x="580" y="164" width="428" height="150" rx="16" fill="#ffffff" stroke="#d0d7de"/>
+  </g>
+
+  <text x="120" y="198" font-size="12" font-weight="700" fill="#8c959f" letter-spacing="1.4">THE AUDITOR ASKS</text>
+  <text x="120" y="226" font-size="15" font-weight="600" fill="#1f2328">“What did you know on April 30?”</text>
+  <text x="120" y="252" font-size="13" fill="#57606a">Replay to April 30: the late invoice is <tspan font-weight="700">not there</tspan>.</text>
+  <text x="120" y="272" font-size="13" fill="#57606a">Your April report matches — byte for byte.</text>
+  <text x="120" y="296" font-size="12" fill="#007aff">the world as you knew it then</text>
+
+  <text x="608" y="198" font-size="12" font-weight="700" fill="#8c959f" letter-spacing="1.4">THE ACCOUNTANT ASKS</text>
+  <text x="608" y="226" font-size="15" font-weight="600" fill="#1f2328">“Which invoices belong to April?”</text>
+  <text x="608" y="252" font-size="13" fill="#57606a">With today's knowledge: the late invoice <tspan font-weight="700">is there</tspan> —</text>
+  <text x="608" y="272" font-size="13" fill="#57606a">it was issued April 10, it belongs to April.</text>
+  <text x="608" y="296" font-size="12" fill="#007aff">April, as completely as you know it today</text>
+
+  <text x="550" y="350" text-anchor="middle" font-size="13" fill="#8c959f">Both answers are correct — they are different questions. A one-axis system must lie about one of them.</text>
+</svg>

@@ -1,0 +1,3 @@
+facility_id,bank,account_iban,limit,drawn,review_date
+KK-2026-001,Commerce Bank Cologne,DE89370400440532013000,50000.00,0.00,2026-12-31
+KK-2026-002,Cologne-Bonn Savings Bank,DE08370400440532013003,25000.00,2600.00,2026-09-30

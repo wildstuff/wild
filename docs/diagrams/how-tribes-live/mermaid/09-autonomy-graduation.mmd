@@ -1,0 +1,11 @@
+flowchart TD
+    New["New Tribe:<br/>asks about everything"] --> Track["builds a track record<br/>(Judge scores accrue)"]
+    Track --> Q{"quality above<br/>the floor?"}
+    Q -->|"no"| Track
+    Q -->|"yes"| Suggest["system proposes<br/>graduation"]
+    Suggest --> Op{"operator<br/>approves?"}
+    Op -->|"yes"| Auto["routine recoverable work<br/>now runs autonomously"]
+    Op -->|"no"| Track
+    Auto -->|"quality later collapses"| Demote["demoted → quarantined<br/>(reverts to propose-only)"]
+    Demote --> Track
+    Auto -.->|"irreversible work<br/>still always asks"| New

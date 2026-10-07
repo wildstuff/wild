@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1140 700" role="img" aria-labelledby="title desc">
+  <title id="title">The Wild — what runs where</title>
+  <desc id="desc">One machine holds the whole runtime: the operator's two doors (Wild.app dashboard and the wild CLI) feed the wild-hostd daemon, whose WebAssembly sandbox runs Elder, the Chiefs, the Workers and every forged tool over capability-gated host plugins, on a NATS/JetStream bus and a filesystem that is the canonical store; wild-appd serves derived apps to your people's phones on the LAN, and the model of your choice can be a cloud API or a local llama-server. Outside the machine sits wild-forged, the remote build server: generated source goes out, a signed Wasm component comes back through your approval gate — only code the system wrote transits, never your data. The builder has three homes: hosted by Wildstuff, your own Linux box, or a silent VM on your Mac.</desc>
+  <style>
+    text { font-family: ui-sans-serif, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif; fill: #1f2933; }
+    .mono  { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .title { font-size: 15px; font-weight: 650; }
+    .sub   { font-size: 11.5px; fill: #57606a; }
+    .label { font-size: 12px; fill: #57606a; }
+    .chipt { font-size: 13px; font-weight: 600; }
+    .cap   { font-size: 10.5px; fill: #2f9e6b; font-weight: 700; letter-spacing: 1.4px; }
+    .cap-e { font-size: 10.5px; fill: #e08a2b; font-weight: 700; letter-spacing: 1.4px; }
+    .boundary   { fill: #2f9e6b; fill-opacity: 0.05; stroke: #2f9e6b; stroke-width: 1.5; }
+    .boundary-e { fill: #e08a2b; fill-opacity: 0.06; stroke: #e08a2b; stroke-width: 1.5; stroke-dasharray: 6 4; }
+    .box   { fill: #ffffff; stroke: #9aa4af; stroke-width: 1.25; }
+    .box-e { fill: #ffffff; stroke: #e08a2b; stroke-width: 1.4; }
+    .strip { fill: #f3f1ea; stroke: #9aa4af; stroke-width: 1; }
+    .chip   { fill: #ffffff; stroke: #9aa4af; stroke-width: 1.1; }
+    .chip-e { fill: #e08a2b; fill-opacity: 0.1; stroke: #e08a2b; stroke-width: 1.2; }
+    .ext   { fill: #f3f1ea; stroke: #9aa4af; stroke-width: 1.1; }
+    .flow   { stroke: #57606a; stroke-width: 1.4; fill: none; }
+    .flow-e { stroke: #e08a2b; stroke-width: 1.6; fill: none; }
+    .gate  { fill: #ffffff; stroke: #e08a2b; stroke-width: 1.4; }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path fill="#57606a" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <marker id="arr-e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path fill="#e08a2b" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1140" height="700" fill="#fbfaf7"/>
+
+  <!-- the operator, above the boundary -->
+  <text x="390" y="34" text-anchor="middle" class="chipt">you — the operator</text>
+  <line class="flow" x1="330" y1="46" x2="296" y2="144" marker-end="url(#arr)"/>
+  <line class="flow" x1="450" y1="46" x2="484" y2="144" marker-end="url(#arr)"/>
+
+  <!-- your machine -->
+  <rect class="boundary" x="170" y="80" width="590" height="580" rx="14"/>
+  <text x="192" y="110" class="cap">YOUR MACHINE</text>
+  <text x="192" y="128" class="sub">Mac or Linux — runtime data never leaves</text>
+
+  <!-- operator surfaces -->
+  <rect class="box" x="200" y="150" width="190" height="64" rx="8"/>
+  <text x="295" y="177" text-anchor="middle" class="title">Wild.app</text>
+  <text x="295" y="196" text-anchor="middle" class="sub">dashboard · Elder chat</text>
+
+  <rect class="box" x="410" y="150" width="150" height="64" rx="8"/>
+  <text x="485" y="177" text-anchor="middle" class="title mono">wild</text>
+  <text x="485" y="196" text-anchor="middle" class="sub">CLI · chat · watch</text>
+
+  <line class="flow" x1="295" y1="214" x2="295" y2="242" marker-end="url(#arr)"/>
+  <line class="flow" x1="485" y1="214" x2="485" y2="242" marker-end="url(#arr)"/>
+
+  <!-- wild-hostd -->
+  <rect class="box" x="200" y="246" width="540" height="224" rx="10"/>
+  <text x="218" y="274" class="title mono">wild-hostd</text>
+  <text x="722" y="274" text-anchor="end" class="sub">the runtime daemon</text>
+
+  <rect class="strip" x="218" y="288" width="504" height="94" rx="8" stroke-dasharray="5 4"/>
+  <text x="232" y="307" class="cap" style="letter-spacing:1px">WEBASSEMBLY SANDBOX · WASMTIME</text>
+
+  <rect class="chip" x="232" y="318" width="102" height="46" rx="7"/>
+  <text x="283" y="346" text-anchor="middle" class="chipt">Elder</text>
+  <rect class="chip" x="346" y="318" width="102" height="46" rx="7"/>
+  <text x="397" y="346" text-anchor="middle" class="chipt">Chiefs</text>
+  <rect class="chip" x="460" y="318" width="104" height="46" rx="7"/>
+  <text x="512" y="346" text-anchor="middle" class="chipt">Workers</text>
+  <rect class="chip-e" x="576" y="318" width="130" height="46" rx="7"/>
+  <text x="641" y="346" text-anchor="middle" class="chipt">forged tools</text>
+
+  <rect class="strip" x="218" y="396" width="504" height="58" rx="8"/>
+  <text x="232" y="415" class="cap" style="letter-spacing:1px">HOST PLUGINS</text>
+  <text x="232" y="438" class="chipt" style="font-weight:500">Atlas · secrets · bus · files · forge · apps — capability-gated doors</text>
+
+  <!-- substrate -->
+  <line class="flow" x1="330" y1="470" x2="330" y2="498" marker-end="url(#arr)"/>
+  <line class="flow" x1="610" y1="470" x2="610" y2="498" marker-end="url(#arr)"/>
+
+  <rect class="box" x="200" y="502" width="255" height="68" rx="8"/>
+  <text x="327" y="530" text-anchor="middle" class="title">NATS · JetStream</text>
+  <text x="327" y="549" text-anchor="middle" class="sub">the event bus — everything rides it</text>
+
+  <rect class="box" x="475" y="502" width="265" height="68" rx="8"/>
+  <text x="607" y="530" text-anchor="middle" class="title mono">&lt;profile_root&gt;/</text>
+  <text x="607" y="549" text-anchor="middle" class="sub">canonical store — Atlas, tribes, history</text>
+
+  <!-- wild-appd -->
+  <rect class="box" x="200" y="594" width="255" height="52" rx="8"/>
+  <text x="327" y="616" text-anchor="middle" class="title mono" style="font-size:14px">wild-appd</text>
+  <text x="327" y="633" text-anchor="middle" class="sub">serves the derived apps</text>
+
+  <!-- external: the model -->
+  <rect class="ext" x="14" y="286" width="142" height="84" rx="9"/>
+  <text x="85" y="312" text-anchor="middle" class="chipt">the model</text>
+  <text x="85" y="332" text-anchor="middle" class="sub">cloud API or local</text>
+  <text x="85" y="348" text-anchor="middle" class="sub">llama-server — your call</text>
+  <line class="flow" x1="200" y1="328" x2="162" y2="328" marker-end="url(#arr)" marker-start="url(#arr)"/>
+
+  <!-- external: your people -->
+  <rect class="ext" x="14" y="578" width="142" height="68" rx="9"/>
+  <text x="85" y="604" text-anchor="middle" class="chipt">your people</text>
+  <text x="85" y="624" text-anchor="middle" class="sub">phones · your LAN</text>
+  <line class="flow" x1="200" y1="612" x2="162" y2="612" marker-end="url(#arr)"/>
+
+  <!-- the forge, remote -->
+  <text x="880" y="232" class="cap-e">THE FORGE — REMOTE BY DEFAULT</text>
+  <rect class="boundary-e" x="880" y="246" width="246" height="224" rx="12"/>
+  <text x="898" y="278" class="title mono">wild-forged</text>
+  <text x="1108" y="278" text-anchor="end" class="sub">the build server</text>
+
+  <rect class="box-e" x="898" y="296" width="210" height="150" rx="8"/>
+  <text x="912" y="322" class="chipt">build sandbox</text>
+  <text x="912" y="348" class="sub">pinned Rust toolchain</text>
+  <text x="912" y="368" class="sub">no network · no volumes</text>
+  <text x="912" y="388" class="sub">compiles to Wasm,</text>
+  <text x="912" y="404" class="sub">pinned by content hash</text>
+  <text x="912" y="430" class="sub" style="fill:#e08a2b">sees code, never data</text>
+
+  <!-- forge flows -->
+  <line class="flow-e" x1="760" y1="300" x2="874" y2="300" marker-end="url(#arr-e)"/>
+  <text x="817" y="290" text-anchor="middle" class="label">generated source</text>
+
+  <line class="flow-e" x1="880" y1="392" x2="836" y2="392"/>
+  <path class="gate" d="M 817 378 L 836 392 L 817 406 L 798 392 Z"/>
+  <line class="flow-e" x1="798" y1="392" x2="766" y2="392" marker-end="url(#arr-e)"/>
+  <text x="817" y="368" text-anchor="middle" class="label">signed component</text>
+  <text x="817" y="424" text-anchor="middle" class="label" style="font-size:10.5px">your approval</text>
+
+  <text x="880" y="500" class="sub">Only source the system wrote transits.</text>
+  <text x="880" y="518" class="sub" style="fill:#1f2933; font-weight:600">Your data never does.</text>
+
+  <!-- three homes for the builder -->
+  <text x="880" y="552" class="cap-e" style="letter-spacing:1px">THREE HOMES FOR THE BUILDER</text>
+  <rect class="chip" x="880" y="562" width="246" height="28" rx="14"/>
+  <text x="1003" y="580" text-anchor="middle" class="sub">hosted by Wildstuff — the default</text>
+  <rect class="chip" x="880" y="598" width="246" height="28" rx="14"/>
+  <text x="1003" y="616" text-anchor="middle" class="sub">your own Linux box — air-gapped</text>
+  <rect class="chip" x="880" y="634" width="246" height="28" rx="14"/>
+  <text x="1003" y="652" text-anchor="middle" class="sub">a silent VM on your Mac — vsock</text>
+</svg>

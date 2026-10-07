@@ -1,0 +1,15 @@
+log_id,date,food_id,meal,grams,kcal,notes
+FL-2026-0001,2026-06-20,oats,breakfast,80,311.20,with milk
+FL-2026-0002,2026-06-20,chicken-breast,lunch,200,330.00,
+FL-2026-0003,2026-06-20,banana,snack,120,106.80,
+FL-2026-0004,2026-06-21,greek-yogurt,breakfast,200,118.00,
+FL-2026-0005,2026-06-21,salmon,dinner,180,374.40,
+FL-2026-0006,2026-06-21,white-rice,dinner,150,195.00,
+FL-2026-0007,2026-06-22,egg,breakfast,100,155.00,two eggs
+FL-2026-0008,2026-06-22,wholemeal-bread,breakfast,60,148.20,
+FL-2026-0009,2026-06-22,beef-mince,dinner,150,375.00,
+FL-2026-0010,2026-06-23,apple,snack,150,78.00,
+FL-2026-0011,2026-06-23,pasta,lunch,200,262.00,
+FL-2026-0012,2026-06-24,almonds,snack,30,173.70,
+FL-2026-0013,2026-06-25,lentils,lunch,200,232.00,
+FL-2026-0014,2026-06-26,peanut-butter,breakfast,30,176.40,on toast

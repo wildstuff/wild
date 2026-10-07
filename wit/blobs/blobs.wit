@@ -1,0 +1,135 @@
+// WILD Blobs Interface
+// Binary attachment storage built on NATS JetStream Object Store.
+//
+// Used for non-text content that doesn't fit the MD-first model:
+//   - PDF uploads (vehicle docs, invoices)
+//   - Images (vehicle photos, screenshots)
+//   - Audio / voice notes (Phase B)
+//
+// Provided by: storage provider. Bucket-per-tribe convention
+// mirrors NATS KV bucket naming: blob-{tribe_id}.
+//
+// Opaque binary content goes through this interface; structured
+// metadata lives elsewhere.
+//
+// Read/write split (mirrors wild:data's query/graph-vs-store/schema
+// split): the package exposes TWO capability interfaces over the same
+// store, so the capability gate can grant read without write —
+//   - `read`   — pull bytes + metadata back (read / head / list). The
+//                safe-minimal surface an Unknown-tier plugin may hold
+//                (see `plugin_trust_gate::UNKNOWN_ALLOWLIST`).
+//   - `store`  — mutate (put / delete).
+//   - `reader` — native component-model-async streaming read
+//                (`read-stream`), no 4 MiB cap. ADR-0100 D2.
+//   - `writer` — native streaming write (`write-stream`), no cap. D2.
+// Shared records + the error variant live in `types`. Splitting `read`
+// out of the original single `store` interface was the @0.2.0 break;
+// @0.3.0 drops the never-called chunked-multipart verbs (init-upload /
+// append-chunk / complete-upload / abort-upload + read-chunked) and the
+// `link-to-doc` verb (pointed at the ADR-0026-F1-retired wild:docs).
+// @0.4.0 folds the ADR-0100 D2 `stream<u8>` verbs back in from the interim
+// isolated `wild:blob-stream@0.1.0` package (now deleted): a `stream<u8>` /
+// `async func` was unparseable by wit-bindgen 0.35, so it lived apart until
+// every `wild:blobs` consumer moved to 0.58 (the tree-wide bump). The stream
+// verbs need the component-model-async ABI (wasmtime 46 / wit-bindgen 0.58).
+//
+// Bucket-scope discipline:
+//   every blob key MUST start with "{caller_org}/" or the storage
+//   provider returns "scope-violation". PUT stays caller-scoped. Caller
+//   identity comes from the host-stamped identity on the envelope, not
+//   from the request payload, so a malicious component cannot spoof it.
+//
+// Size discipline:
+//   - `put` (single-shot): hard cap PUT_INLINE_MAX_BYTES (default 4 MiB).
+//     Above the cap → InlineCapExceeded.
+//   - `read` (single-shot): hard cap READ_INLINE_MAX_BYTES (default 4 MiB).
+//     Above the cap → ReadCapExceeded.
+
+package wild:blobs@0.4.0;
+
+// Records + the error variant shared by `read` and `store`.
+interface types {
+
+    record blob-entry {
+        /// Object Store key (e.g., "files/intake/2026-04-25-bmw.pdf")
+        key: string,
+        /// MIME type (e.g., "application/pdf", "image/jpeg")
+        content-type: string,
+        /// Size in bytes
+        size: u64,
+        /// SHA-256 of the bytes (hex)
+        sha256: string,
+        /// ISO-8601 upload timestamp
+        uploaded-at: string,
+        /// Who uploaded — agent name, "user", or component id
+        uploader: string,
+        /// Optional links back to MD docs that reference this blob
+        linked-docs: list<string>,
+    }
+
+    /// Tagged so callers can branch on the kind without parsing
+    /// strings. Each variant carries a human-readable detail.
+    variant blob-error {
+        /// Caller's bytes exceed PUT_INLINE_MAX_BYTES.
+        inline-cap-exceeded(string),
+        /// `read` payload exceeds READ_INLINE_MAX_BYTES.
+        read-cap-exceeded(string),
+        /// Key already present with different sha256 and overwrite=false.
+        already-exists(string),
+        /// Key violates the bucket-scope discipline (see header).
+        scope-violation(string),
+        /// Blob doesn't exist.
+        not-found(string),
+        /// Anything else (storage provider returns the underlying msg).
+        internal(string),
+    }
+    // Note: @0.3.0 retained the full error variant shape minus the
+    // chunked-upload-only arms (checksum-mismatch / sequence-error /
+    // upload-not-found), which had no remaining producer after the
+    // multipart verbs were dropped.
+}
+
+// Read-only surface: pull bytes + metadata back. Grantable to
+// least-trusted (Unknown) plugins without exposing any mutation.
+interface read {
+    use types.{blob-entry, blob-error};
+
+    /// Read raw bytes back. Capped at READ_INLINE_MAX_BYTES
+    /// (default 4 MiB) — above the cap, returns ReadCapExceeded.
+    read: func(key: string) -> result<list<u8>, blob-error>;
+
+    /// Metadata only — cheap, doesn't transfer bytes.
+    head: func(key: string) -> result<blob-entry, blob-error>;
+
+    /// List by key prefix.
+    %list: func(prefix: string) -> result<list<blob-entry>, blob-error>;
+}
+
+// Write surface: create / mutate / delete blobs. The privileged half
+// of the split.
+interface store {
+    use types.{blob-entry, blob-error};
+
+    /// Upload bytes in one shot. Capped at PUT_INLINE_MAX_BYTES (4 MiB
+    /// default) — above the cap, returns InlineCapExceeded.
+    /// CAS via sha256: if the same key already exists with a different
+    /// hash, returns AlreadyExists unless `overwrite: true`.
+    put: func(
+        key: string,
+        bytes: list<u8>,
+        content-type: string,
+        uploader: string,
+        overwrite: bool,
+    ) -> result<blob-entry, blob-error>;
+
+    /// Soft delete (kept for retention, hidden from list).
+    delete: func(key: string) -> result<_, blob-error>;
+}
+
+// NOTE: the ADR-0100 D2 native streaming halves (`reader` / `writer`,
+// `stream<u8>` / `async func`) live in the sibling file `stream.wit` — same
+// `wild:blobs@0.4.0` package, split out because wit-bindgen 0.35 /
+// cargo-component 0.18 cannot parse `async func`. Keeping THIS file async-free
+// lets a 0.35 consumer (the forge's forged-component build) vendor `blobs.wit`
+// alone for the sync `read`/`store` capabilities; the host + 0.58 guests read
+// the whole `wit/blobs/` directory and see all five interfaces.
