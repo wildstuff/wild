@@ -1,0 +1,22 @@
+# Intake mapping for the ADR-0202 D5 weekly forecast seed.
+#
+# It exists because a `data/*.csv` is matched to a target type by the
+# FINGERPRINT of its header, and that fingerprint is only registered by an
+# `.intake.yaml` beside it. A CSV without this file is skipped — named, with
+# its reason — and the apply FAILS instead of deploying green around the hole
+# (`--allow-holes` opts into a partial seed deliberately).
+#
+# 1:1 with `cash_inflow_estimate`, so auto-intake: only
+# `{target_type, columns, key}` ships and the records lane derives the identity
+# map. `cash_inflow_estimate` is an AUTHORED type, so the write is an Upsert and
+# no recurring source is expected for it — which is also why the "the model
+# declares no source for this fingerprint" warning is deliberately silent here.
+target_type: cash_inflow_estimate
+# Both key parts, matching the type's identity. A partial key would join every
+# estimate onto one truncated row rather than refusing.
+key: [target_date, procedure_version]
+# The exact CSV header, and NOTE what is absent: `expected_inflow`. The seed
+# ships the QUESTION — the date, the horizon and the Procedure version — and the
+# Procedure fills the figure at the ingest boundary. Adding the column here
+# would mean the seed answered its own question.
+columns: [as_of, target_date, horizon_days, procedure_version]

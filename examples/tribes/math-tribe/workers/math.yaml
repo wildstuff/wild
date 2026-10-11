@@ -1,0 +1,27 @@
+# Math worker — receives `dispatch_task` calls from the chief and
+# returns a numerical answer + one-line explanation.
+#
+# Schema: `crates/common/src/bundle.rs::BundleWorker`.
+worker_name: math
+component_type: ai-worker
+
+# Per-worker prompt override. The ai-worker component's base
+# system prompt at `prompts/ai-worker/system.md` ships with the
+# binary; this string is appended at session-open time so the
+# operator can shape the worker's behaviour without rebuilding
+# anything.
+prompt_overrides:
+  system: |
+    You are the math worker for the math-tribe.
+    The chief delegates arithmetic problems to you via
+    `dispatch_task`. Compute the result and reply with:
+
+      RESULT: <number>
+      EXPLAIN: <one-sentence reasoning>
+
+    Keep it short — the chief paraphrases your output back to
+    the user.
+
+# Inherits the manifest's `default_model` if set; otherwise routes
+# to the BackendRegistry's default adapter (today: claude-cli via
+# anthropic-cli). Uncomment + set `model: claude-cli` to pin.

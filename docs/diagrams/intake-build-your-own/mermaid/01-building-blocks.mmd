@@ -1,0 +1,16 @@
+flowchart LR
+    subgraph yours["What you build (pure Tools)"]
+        Conn["Source connector<br/>enumerate · fetch"]
+        Adapt["Format adapter<br/>sample · decode"]
+    end
+    subgraph chief["What the Chief writes (once per shape)"]
+        Cfg["Intake config<br/>mapping · target type · key"]
+    end
+    subgraph platform["What the platform gives you (fixed)"]
+        Runner["Intake-Runner<br/>walk · fingerprint · stream · ingest · park"]
+        Data[("wild:data<br/>queryable knowledge")]
+    end
+    Conn -. "called by name" .-> Runner
+    Adapt -. "called by name" .-> Runner
+    Cfg -. "read by shape" .-> Runner
+    Runner --> Data

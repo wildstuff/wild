@@ -1,0 +1,280 @@
+# ADR-0154 — the operator-published end-user app: a composition of VIEWS over
+# this tribe's ontology. FS-canonical (a sibling of `ontology/`, `flows/`,
+# `specs/`), interpreted by one generic renderer. This worked example exercises
+# ALL EIGHT built-in view kinds (D7 + ADR-0175 G13) so the schema + the
+# `wild app validate` reader are proven end to end against a real ontology, plus
+# the ADR-0175 feature surface: grid layout (G9), audience gates (G6),
+# onboarding / empty-state cards (G14), design-token branding (G11), the
+# time-driven table representations (gantt / calendar, D11), and the
+# change-history trail + cross-view record wiring (D11 / D16).
+#
+# Every slug below RESOLVES against `../ontology/model.yaml`:
+#   entities    — invoice, business_partner
+#   projections — debtor (the chartable group-by read-model)
+#   effects     — verify_invoice
+# The presentation (column order, titling, currency formatting) comes from the
+# ontology's reading marks (ADR-0155), not from this file — this file composes.
+#
+# The `custom` (ADR-0161 plugin widget) and per-view cross-`tribe` kinds are
+# deliberately NOT exercised: the first needs a widget plugin the WidgetCatalog
+# does not yet carry, the second needs a second real tribe to bind. Saved views
+# (ADR-0162) need only the `personalizable` opt-in, already set below.
+
+id: liquidity-cockpit
+name: Liquidity Cockpit
+# ADR-0154 D9 (amendment) — every view here binds this tribe; a multi-tribe app
+# would set per-view `tribe:` and leave the majority to `default_tribe`.
+#
+# NO `default_tribe:` ON PURPOSE. Absent, every unmarked view binds the CARRIER
+# — the tribe the app is published under — so this bundle deploys correctly
+# under any id, including the `--as acme-liquidity` the README suggests. Naming
+# the tribe literally here is the footgun: the customer portal (wild-appd)
+# scopes a customer token to a tribe and 404s an app whose `default_tribe`
+# names a tribe that token does not permit, so a hard-coded id silently makes
+# the published app unreachable the moment someone renames the deployment. Set
+# `default_tribe` only when an app must bind a tribe OTHER than its carrier.
+branding:
+  # ADR-0175 G11 — a tiny inline-SVG logo (data-URI, an open token the renderer
+  # resolves). Keeps the bundle self-contained; no external asset fetch.
+  logo: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='10' fill='%230f766e'/><path d='M7 13l3 3 7-8' stroke='white' stroke-width='2' fill='none'/></svg>"
+  accent: teal
+  color_scheme: system
+  # ADR-0175 G11 — the density PRESET, and a deliberate one: this is the dense
+  # working surface an operator keeps open all day, so more rows fit on screen.
+  # The sibling report stays `normal` (a reading surface) and the fitness
+  # sample's client app is `comfortable` — one preset per surface, each for a
+  # stated reason.
+  #
+  # `compact` multiplies the whole spacing ladder by 0.85. It was INERT until
+  # 2026-08-04: the preset was a stylesheet rule (`.wv-density-compact`) while
+  # the renderer wrote `--wv-spacing-scale` inline from `spacing_scale`, and an
+  # inline custom property outranks every class rule — so an operator who asked
+  # for compact got nothing. The two now COMPOSE into the one emitted value.
+  density: compact
+  radius: 8
+  # No `spacing_scale`/`font_scale` here on purpose: both default to 1.0, and
+  # leaving them out lets the `density` preset speak alone (they multiply). Set
+  # them when you want a nudge the three presets do not give you.
+  palette:
+    primary: teal
+    success: green
+    warning: amber
+    danger: red
+    surface: gray
+
+pages:
+  # ── Overview: the at-a-glance numbers and the trend, arranged on a grid ────
+  - id: overview
+    title: Overview
+    # ADR-0175 G14 — a first-visit onboarding card explaining the page.
+    onboarding:
+      title: Welcome to the Liquidity Cockpit
+      message: >-
+        At a glance: overdue and open receivables, the 13-week cash flow and
+        the receivables exposure per business partner. Details are under
+        "Receivables", due dates under "Due Dates".
+      when: first_visit
+    # ADR-0175 G9 — a responsive grid: two KPI tiles on top, the exposure chart
+    # full width below; a single column on mobile.
+    layout:
+      type: grid
+      columns: ["1fr", "1fr"]
+      gap: 16
+      areas:
+        - "kpi1 kpi2"
+        - "exposure exposure"
+        - "late late"
+      cells:
+        - { view: overdue-tile, area: kpi1 }
+        - { view: receivables-tile, area: kpi2 }
+        - { view: debtor-exposure, area: exposure, wide: true }
+        - { view: debtor-overdue, area: late, wide: true }
+      breakpoints:
+        - name: mobile
+          columns: ["1fr"]
+          areas:
+            - "kpi1"
+            - "kpi2"
+            - "exposure"
+            - "late"
+    views:
+      # view — KPI tile over one projection measure
+      - id: overdue-tile
+        type: kpi-tile
+        projection: debtor
+        measure: overdue_amount
+        label: Overdue Receivables
+        format: "currency:EUR"
+
+      # view — the open-receivables headline
+      - id: receivables-tile
+        type: kpi-tile
+        projection: debtor
+        measure: open_receivables
+        label: Open Receivables
+        format: "currency:EUR"
+
+      # view — receivables exposure per debtor: total open amount along the
+      # `partner_id` dimension of the `debtor` projection.
+      #
+      # ONE measure per chart, and that is not a style choice. The read plan
+      # folds `y[0]` and only `y[0]` (`plan_chart_query`), and the renderer
+      # draws a single series in a single hue. A second entry under `y:` parses
+      # and then silently never reaches a pixel — this example claimed exactly
+      # that ("compares total exposure against the overdue slice at a glance")
+      # and drew one bar set, which is the worst kind of wrong: it reads as a
+      # comparison and is a single number. The overdue slice is the chart below,
+      # in its own hue, the same way the report's forecast splits money in from
+      # money out.
+      - id: debtor-exposure
+        type: chart
+        projection: debtor
+        x: partner_id
+        y:
+          - open_receivables
+        shape: bar
+        exportable: true
+        # ADR-0209 S1 — the Tier-2 style override: CLOSED color tokens (never a
+        # hex), shadowing the card's accent for this view's scope. App-wide
+        # colors stay in `branding`.
+        style:
+          palette: [teal]
+
+      # view — the same dimension, the LATE slice. A second chart rather than a
+      # second measure (see above), and amber rather than teal so the two read
+      # as different questions instead of two halves of one stack.
+      - id: debtor-overdue
+        type: chart
+        projection: debtor
+        x: partner_id
+        y:
+          - overdue_amount
+        shape: bar
+        exportable: true
+        style:
+          palette: [amber]
+
+  # ── Receivables: the working lists and the record detail ─────────────────
+  - id: receivables
+    title: Receivables
+    views:
+      # view — a record table over the invoice entity (columns derived from the
+      # ontology reading; salience orders them, ADR-0155). Personalizable, so a
+      # user can save a personal filtered view (ADR-0162 runtime ui_state).
+      - id: open-invoices
+        type: table
+        source: entity
+        entity: invoice
+        exportable: true
+        personalizable: true
+        # ADR-0175 G14 — a domain-specific empty state.
+        empty_state:
+          title: No invoices
+          message: >-
+            As soon as invoices are ingested via the feeds or the PDF inbox,
+            they will appear here.
+          when: no_records
+
+      # view — a table over the debtor projection with an explicit column
+      # allowlist (all three are real projection fields)
+      - id: debtor-ledger
+        type: table
+        source: projection
+        projection: debtor
+        columns:
+          - open_receivables
+          - overdue_amount
+          - open_invoice_count
+
+      # view — a single-record detail card over the invoice entity, wired to
+      # listen to the `open-invoices` table for the selected record (ADR-0175 D16
+      # cross-view `record_selected`).
+      - id: invoice-detail
+        type: detail-card
+        entity: invoice
+        record_source: open-invoices
+        # ADR-0209 S1 (D12) — explicit field composition: exactly these record
+        # fields show, in this order (the table `columns` twin). Every entry
+        # must exist on the bound entity; empty/absent keeps the full
+        # reading-derived field set.
+        fields:
+          - due_date
+          - amount
+          - issued_date
+
+      # view — a governed-effect form invoking a granted verb. The param order is
+      # left to inference (verify_invoice takes only invoice_id). Audience-gated
+      # to finance operators (ADR-0175 G6) — a customer never sees the verify
+      # action ("This view is not available for your role").
+      - id: verify-form
+        type: effect-form
+        effect: verify_invoice
+        audience:
+          roles: [operator]
+          groups: [finance]
+
+  # ── Due Dates: the time-driven representations of the same invoices ─────
+  - id: due-dates
+    title: Due Dates & Status
+    views:
+      # view — the invoice table re-shaped as a GANTT (D11): each invoice a bar
+      # from `issued_date` to `due_date`, so the payment window is visible. The
+      # ontology offers `gantt` because the invoice type carries ≥2 date fields.
+      - id: invoice-gantt
+        type: table
+        source: entity
+        entity: invoice
+        representation: gantt
+        date_field: issued_date
+        end_field: due_date
+
+      # view — the same invoices on a CALENDAR (D11), placed on their due date —
+      # the liquidity clock, day by day.
+      - id: invoice-calendar
+        type: table
+        source: entity
+        entity: invoice
+        representation: calendar
+        date_field: due_date
+
+      # view — a TIMELINE / KANBAN (ADR-0175 G13) over `settlement`, the
+      # derived field that coalesces the feed's status with the tribe's
+      # override. Grouping on the raw override would put every untouched
+      # invoice in a `from_source` lane; grouping on the raw mirror would miss
+      # a write-off the tribe performed. `group_by` is spec-authored, never
+      # value-sniffed.
+      #
+      # There is no `overdue` lane, and that is the point: lateness is its own
+      # field now (`aging_state`), because an overdue invoice is still an OPEN
+      # one and a lane that removes it from `open` hides exactly the work that
+      # needs doing. A board groups by ONE axis by construction; the late ones
+      # are counted by the report's Overdue tile and carried on each card.
+      - id: invoice-board
+        type: timeline
+        source: entity
+        entity: invoice
+        group_by: settlement
+        lanes:
+          - open
+          - paid
+          - written_off
+
+  # ── Search: global search across the tribe's records (ADR-0175 G13) ─────────
+  - id: search
+    title: Search
+    views:
+      - id: record-search
+        type: search
+        placeholder: Search for invoice, partner or amount …
+        entities:
+          - invoice
+          - business_partner
+
+  # ── Partner desk: the customer-facing assistant ──────────────────────────
+  - id: partner-desk
+    title: Partner Desk
+    views:
+      # view — a customer tool-mode chat panel
+      - id: partner-chat
+        type: chat-panel
+        placeholder: Ask about the status of your invoices.

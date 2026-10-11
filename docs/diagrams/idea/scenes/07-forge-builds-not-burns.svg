@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 1000 600" font-family="'Chalkboard SE','Comic Sans MS','Segoe Print',sans-serif">
+  <defs>
+    <marker id="ag" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#6b7480"/>
+    </marker>
+    <marker id="ao" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#e08a2b"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="600" rx="18" fill="#fbfaf7"/>
+  <text x="500" y="44" text-anchor="middle" font-size="26" font-weight="bold" fill="#1f2933">Why forge, when there's an LLM?</text>
+  <text x="500" y="70" text-anchor="middle" font-size="15" fill="#6b7480">recurring work is the worst place for a model</text>
+
+  <!-- ================= left card — read it with a model ================= -->
+  <rect x="30" y="94" width="455" height="290" rx="14" fill="#ffffff" stroke="#d8d3c8" stroke-width="2"/>
+  <text x="54" y="126" font-size="14.5" font-weight="bold" fill="#1f2933">Read it with a model — every time</text>
+
+  <!-- document -->
+  <path d="M64,168 h30 l12,12 v44 h-42 z" fill="#eef2f5" stroke="#5b7c99" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M94,168 v12 h12" fill="none" stroke="#5b7c99" stroke-width="2" stroke-linejoin="round"/>
+  <text x="85" y="242" text-anchor="middle" font-size="10.5" fill="#6b7480">the scan</text>
+
+  <path d="M116,196 h36" stroke="#6b7480" stroke-width="1.8" fill="none" marker-end="url(#ag)"/>
+
+  <!-- model chip -->
+  <rect x="160" y="178" width="96" height="36" rx="11" fill="#eef2f5" stroke="#5b7c99" stroke-width="2"/>
+  <text x="208" y="201" text-anchor="middle" font-size="13" font-weight="bold" fill="#1f2933">model</text>
+
+  <!-- loop back -->
+  <path d="M208,222 C208,252 130,252 96,230" fill="none" stroke="#6b7480" stroke-width="1.6" stroke-dasharray="4 5" marker-end="url(#ag)"/>
+  <text x="196" y="262" font-size="11" font-style="italic" fill="#6b7480">again next month</text>
+
+  <!-- token ticks -->
+  <g fill="#e08a2b">
+    <rect x="286" y="186" width="9" height="16" rx="2"/>
+    <rect x="300" y="186" width="9" height="16" rx="2"/>
+    <rect x="314" y="186" width="9" height="16" rx="2"/>
+    <rect x="328" y="186" width="9" height="16" rx="2"/>
+    <rect x="342" y="186" width="9" height="16" rx="2"/>
+  </g>
+  <text x="358" y="200" font-size="13" fill="#e08a2b">…</text>
+  <text x="286" y="226" font-size="10.5" fill="#e08a2b">tokens, every run</text>
+
+  <!-- three wobbly readings -->
+  <g fill="#ffffff" stroke="#c9b8a4" stroke-width="2">
+    <rect x="52" y="286" width="126" height="30" rx="9" transform="rotate(-1 115 301)"/>
+    <rect x="192" y="286" width="126" height="30" rx="9" transform="rotate(1.2 255 301)"/>
+    <rect x="332" y="286" width="126" height="30" rx="9" transform="rotate(-0.8 395 301)"/>
+  </g>
+  <g font-size="12.5" fill="#1f2933" text-anchor="middle">
+    <text x="115" y="306" transform="rotate(-1 115 301)">1,240.00 €</text>
+    <text x="255" y="306" transform="rotate(1.2 255 301)">1.240,00 €</text>
+    <text x="395" y="306" transform="rotate(-0.8 395 301)">1240 €</text>
+  </g>
+  <text x="255" y="336" text-anchor="middle" font-size="10.5" font-style="italic" fill="#6b7480">three runs, three readings</text>
+
+  <text x="54" y="366" font-size="13.5" font-weight="bold" fill="#1f2933">Every run pays again — and the answers wobble.</text>
+
+  <!-- ================= right card — forge it once ================= -->
+  <rect x="515" y="94" width="455" height="290" rx="14" fill="#ffffff" stroke="#d8d3c8" stroke-width="2"/>
+  <text x="539" y="126" font-size="14.5" font-weight="bold" fill="#1f2933">Forge it — once</text>
+
+  <!-- document -->
+  <path d="M549,168 h30 l12,12 v44 h-42 z" fill="#eef2f5" stroke="#5b7c99" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M579,168 v12 h12" fill="none" stroke="#5b7c99" stroke-width="2" stroke-linejoin="round"/>
+  <text x="570" y="242" text-anchor="middle" font-size="10.5" fill="#6b7480">the scan</text>
+
+  <path d="M601,196 h34" stroke="#6b7480" stroke-width="1.8" fill="none" marker-end="url(#ag)"/>
+
+  <!-- anvil with sparks -->
+  <path d="M648,186 h60 l-8,13 h-44 z" fill="#9aa4af" stroke="#1f2933" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M662,199 h32 v10 l10,16 h-52 l10,-16 z" fill="#9aa4af" stroke="#1f2933" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#e08a2b" stroke-width="2.5" stroke-linecap="round">
+    <line x1="678" y1="172" x2="678" y2="162"/>
+    <line x1="660" y1="177" x2="653" y2="168"/>
+    <line x1="696" y1="177" x2="703" y2="168"/>
+  </g>
+  <circle cx="678" cy="181" r="4.5" fill="#e0b341"/>
+
+  <path d="M722,200 h26" stroke="#e08a2b" stroke-width="1.8" fill="none" marker-end="url(#ao)"/>
+
+  <!-- forged tool chip -->
+  <rect x="756" y="182" width="184" height="34" rx="11" fill="#ffffff" stroke="#e08a2b" stroke-width="2"/>
+  <text x="848" y="204" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1f2933">parser  <tspan font-weight="normal" font-style="italic" fill="#e08a2b">✦ forged</tspan></text>
+  <text x="756" y="240" font-size="10.5" fill="#6b7480">real code — no model in the loop</text>
+
+  <!-- three identical readings -->
+  <g fill="#ffffff" stroke="#2f9e6b" stroke-width="2">
+    <rect x="537" y="286" width="126" height="30" rx="9"/>
+    <rect x="677" y="286" width="126" height="30" rx="9"/>
+    <rect x="817" y="286" width="126" height="30" rx="9"/>
+  </g>
+  <g font-size="12.5" fill="#1f2933" text-anchor="middle">
+    <text x="594" y="306">1,240.00 €</text>
+    <text x="734" y="306">1,240.00 €</text>
+    <text x="874" y="306">1,240.00 €</text>
+  </g>
+  <g fill="#2f9e6b">
+    <circle cx="653" cy="290" r="7"/>
+    <circle cx="793" cy="290" r="7"/>
+    <circle cx="933" cy="290" r="7"/>
+  </g>
+  <g fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M650,290 l2,3 l5,-6"/>
+    <path d="M790,290 l2,3 l5,-6"/>
+    <path d="M930,290 l2,3 l5,-6"/>
+  </g>
+  <text x="740" y="336" text-anchor="middle" font-size="10.5" font-style="italic" fill="#6b7480">every run, the same reading</text>
+
+  <text x="539" y="366" font-size="13.5" font-weight="bold" fill="#1f2933">Built once — same input, same answer.</text>
+
+  <!-- ================= what the smithy forges ================= -->
+  <text x="500" y="424" text-anchor="middle" font-size="13" font-weight="bold" fill="#1f2933">What the smithy forges</text>
+  <g fill="#edf7f1" stroke="#2f9e6b" stroke-width="2">
+    <rect x="96" y="438" width="380" height="36" rx="12"/>
+    <rect x="524" y="438" width="380" height="36" rx="12"/>
+  </g>
+  <text x="286" y="461" text-anchor="middle" font-size="12.5" fill="#1f2933"><tspan font-weight="bold">tools</tspan> — parsers · converters · fetchers</text>
+  <text x="714" y="461" text-anchor="middle" font-size="12.5" fill="#1f2933"><tspan font-weight="bold">whole workers</tspan> — watchers · notifiers · indexers</text>
+  <text x="500" y="502" text-anchor="middle" font-size="11" fill="#6b7480">sandboxed · approval-gated · content-pinned — and never new doors to your files or the network</text>
+
+  <text x="500" y="556" text-anchor="middle" font-size="14" font-style="italic" fill="#1f2933">Judgment goes to the model. Repetition goes to code.</text>
+</svg>

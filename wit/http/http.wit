@@ -1,0 +1,109 @@
+// WILD Outbound-HTTP Interface
+//
+// Host-mediated governed outbound egress for components (ADR-0090).
+// Guests reach the network ONLY through this interface; the host owns
+// the socket. Raw `wasi:http` is demoted in the forge-build lockdown
+// so everything the Chief forges egresses through here — a single
+// chokepoint where the allowed-hosts policy, credential injection,
+// rate-limit, and the per-call audit row all live.
+//
+// Trust model:
+//
+//   1. A component declares the `http.fetch` capability and imports
+//      `wild:http/outbound` (trust-gated at instantiation per ADR-0045).
+//      Importing the interface is the COARSE right — "may this module
+//      egress at all".
+//   2. The operator authors `system/egress.yaml` (default-deny): a
+//      destination NAMED there is reachable; an unlisted host is not.
+//      The destination list IS the fine-grained grant — there is no
+//      separate per-component network ACL (ADR-0090 §3).
+//   3. The guest calls `outbound::fetch(request)`. The host parses the
+//      URL, resolves (tribe, host, method) against the policy, injects
+//      any named credential from `wild:secrets` host-side, performs the
+//      request, and emits one `audit.egress` row.
+//
+// Credentials by reference (ADR-0090 §4, extends ADR-0059):
+//
+//   The guest passes `auth: some("stripe_key")` — a NAME, never a
+//   value. The host maps the name through the destination's `auth`
+//   binding to a `wild:secrets` alias and injects per the binding's
+//   scheme (bearer / header / basic / query). The plaintext credential
+//   never crosses this WIT boundary.
+//
+// Status is data, not error:
+//
+//   A non-2xx upstream response (after the host's retry budget) returns
+//   `ok(response)` carrying the real status — the guest treats `404` /
+//   `409` as domain outcomes. Only POLICY (denied host / auth, rate
+//   limit) and TRANSPORT (DNS / TLS / timeout) failures are `error`.
+
+package wild:http@0.1.0;
+
+interface outbound {
+    /// HTTP method. The egress policy may restrict a destination to a
+    /// subset; an un-permitted method resolves to `denied-host`.
+    enum method { get, post, put, patch, delete, head }
+
+    record request {
+        method:     method,
+        url:        string,
+        headers:    list<tuple<string, string>>,
+        body:       option<list<u8>>,
+        /// Named auth binding from the egress policy. The host injects
+        /// the credential from `wild:secrets`; the guest never sees it.
+        auth:       option<string>,
+        /// Per-call timeout, clamped to the destination's policy ceiling.
+        timeout-ms: option<u32>,
+    }
+
+    record response {
+        /// Upstream status, verbatim — a 404 is `ok`, not an error.
+        status:     u16,
+        headers:    list<tuple<string, string>>,
+        body:       list<u8>,
+        elapsed-ms: u32,
+        /// How many tries the host made (retries are host-side, V1 = 1).
+        attempts:   u8,
+    }
+
+    /// POLICY / TRANSPORT failures only — never an HTTP status. A
+    /// non-2xx upstream response (after retries) returns `ok(response)`;
+    /// the caller decides how to treat the status code.
+    variant error {
+        /// Destination not on the egress allowlist (or method/tribe
+        /// not permitted for the matched destination).
+        denied-host(string),
+        /// Auth binding unknown or not granted for this destination.
+        denied-auth(string),
+        /// Local rate-limit budget exhausted (after backoff).
+        rate-limited(string),
+        /// Per-call / destination timeout elapsed.
+        timeout(string),
+        /// DNS / TLS / connection failure.
+        transport(string),
+    }
+
+    fetch: func(req: request) -> result<response, error>;
+}
+
+// The ADR-0100 native streaming egress half (`interface outbound-stream`,
+// `fetch-stream: async func`) lives in the sibling `stream.wit` of this
+// same `wild:http@0.1.0` package. It is SPLIT OUT by file on purpose, the
+// same discipline `wild:blobs`/`wild:files` carry for a forge-vendored
+// package:
+//   - `wild:http` is forge-vendored — the chief's `wright.rs` seeds a forged
+//     component's WIT via `include_str!` of THIS `http.wit` alone (`WIT_HTTP`,
+//     `dep_rel: wild-http/http.wit`). Keeping the async half OUT of that file
+//     makes streaming egress FIRST-PARTY only: a forged component declaring
+//     `http.fetch` gets the buffered `outbound` (sync `fetch`), never
+//     `outbound-stream`.
+//   - `async func` / `stream<u8>` are unparseable by wit-bindgen 0.35 /
+//     cargo-component 0.18, so an async-free `http.wit` also keeps any 0.35
+//     vendor path building.
+// The host and 0.58 guests read the whole `wit/http/` directory and get both
+// halves.
+//
+// The host bindgen world (`http-host`) is a host-tree-only sidecar
+// (`crates/runtime/wild-host/wit/wild/http/host-world.wit`) so this canonical
+// file carries the contract, not the host wiring — mirroring every other
+// split package.

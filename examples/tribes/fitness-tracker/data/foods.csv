@@ -1,0 +1,38 @@
+food_id,name,kcal_per_100g,protein_g,carbs_g,fat_g,category,source_url
+chicken-breast,Chicken breast (cooked),165,31,0,3.6,protein,https://fdc.nal.usda.gov
+white-rice,White rice (cooked),130,2.7,28,0.3,carb,https://fdc.nal.usda.gov
+banana,Banana,89,1.1,23,0.3,fruit,https://fdc.nal.usda.gov
+egg,Egg (whole),155,13,1.1,11,protein,https://fdc.nal.usda.gov
+oats,Oats (dry),389,17,66,7,carb,https://fdc.nal.usda.gov
+salmon,Salmon (cooked),208,20,0,13,protein,https://fdc.nal.usda.gov
+broccoli,Broccoli,34,2.8,7,0.4,vegetable,https://fdc.nal.usda.gov
+almonds,Almonds,579,21,22,49,fat,https://fdc.nal.usda.gov
+greek-yogurt,Greek yogurt (plain),59,10,3.6,0.4,dairy,https://fdc.nal.usda.gov
+apple,Apple,52,0.3,14,0.2,fruit,https://fdc.nal.usda.gov
+whole-milk,Whole milk,61,3.2,4.8,3.3,dairy,https://fdc.nal.usda.gov
+olive-oil,Olive oil,884,0,0,100,fat,https://fdc.nal.usda.gov
+sweet-potato,Sweet potato (cooked),86,1.6,20,0.1,carb,https://fdc.nal.usda.gov
+beef-mince,Beef mince (cooked),250,26,0,15,protein,https://fdc.nal.usda.gov
+pasta,Pasta (cooked),131,5,25,1.1,carb,https://fdc.nal.usda.gov
+avocado,Avocado,160,2,9,15,fat,https://fdc.nal.usda.gov
+peanut-butter,Peanut butter,588,25,20,50,fat,https://fdc.nal.usda.gov
+wholemeal-bread,Wholemeal bread,247,13,41,3.4,carb,https://fdc.nal.usda.gov
+cheddar,Cheddar cheese,403,25,1.3,33,dairy,https://fdc.nal.usda.gov
+lentils,Lentils (cooked),116,9,20,0.4,protein,https://fdc.nal.usda.gov
+tuna-canned,Tuna (canned in water),116,26,0,1,protein,https://fdc.nal.usda.gov
+cottage-cheese,Cottage cheese (low-fat),72,12,3,1,dairy,https://fdc.nal.usda.gov
+quinoa,Quinoa (cooked),120,4.4,21,1.9,carb,https://fdc.nal.usda.gov
+black-beans,Black beans (cooked),132,8.9,24,0.5,protein,https://fdc.nal.usda.gov
+spinach,Spinach (raw),23,2.9,3.6,0.4,vegetable,https://fdc.nal.usda.gov
+tofu,Tofu (firm),144,17,3,9,protein,https://fdc.nal.usda.gov
+brown-rice,Brown rice (cooked),123,2.7,26,1,carb,https://fdc.nal.usda.gov
+potato,Potato (boiled),87,1.9,20,0.1,carb,https://fdc.nal.usda.gov
+carrot,Carrot (raw),41,0.9,10,0.2,vegetable,https://fdc.nal.usda.gov
+orange,Orange,47,0.9,12,0.1,fruit,https://fdc.nal.usda.gov
+strawberries,Strawberries,32,0.7,7.7,0.3,fruit,https://fdc.nal.usda.gov
+walnuts,Walnuts,654,15,14,65,fat,https://fdc.nal.usda.gov
+turkey-breast,Turkey breast (cooked),135,30,0,1,protein,https://fdc.nal.usda.gov
+shrimp,Shrimp (cooked),99,24,0.2,0.3,protein,https://fdc.nal.usda.gov
+chickpeas,Chickpeas (cooked),164,8.9,27,2.6,protein,https://fdc.nal.usda.gov
+tomato,Tomato,18,0.9,3.9,0.2,vegetable,https://fdc.nal.usda.gov
+blueberries,Blueberries,57,0.7,14,0.3,fruit,https://fdc.nal.usda.gov

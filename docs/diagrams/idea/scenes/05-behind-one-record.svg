@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560" font-family="'Chalkboard SE','Comic Sans MS','Segoe Print',sans-serif">
+  <defs>
+    <marker id="z" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#9aa4af"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="560" rx="18" fill="#fbfaf7"/>
+  <text x="500" y="46" text-anchor="middle" font-size="27" font-weight="bold" fill="#1f2933">Behind one record: the ontology</text>
+  <text x="500" y="72" text-anchor="middle" font-size="15" fill="#6b7480">step back twice and the single record turns out to be an instance of a declared world</text>
+
+  <!-- ============ 1 — one record ============ -->
+  <text x="36" y="106" font-size="12" font-weight="bold" fill="#9aa4af">ONE RECORD</text>
+  <rect x="36" y="116" width="248" height="332" rx="14" fill="#ffffff" stroke="#d8d3c8" stroke-width="2"/>
+  <rect x="60" y="150" width="200" height="38" rx="11" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2"/>
+  <text x="160" y="174" text-anchor="middle" font-size="13" font-weight="bold" fill="#1f2933">Stadtwerke Nord</text>
+  <g font-size="12" fill="#1f2933">
+    <text x="62" y="222">name</text>
+    <text x="62" y="252">customer no.</text>
+    <text x="62" y="282">notice period</text>
+  </g>
+  <g font-size="12" fill="#6b7480" text-anchor="end">
+    <text x="258" y="222">Stadtwerke …</text>
+    <text x="258" y="252">4471-B</text>
+    <text x="258" y="282">3 months</text>
+  </g>
+  <line x1="60" y1="300" x2="260" y2="300" stroke="#e6e2d8" stroke-width="1.6"/>
+  <text x="160" y="326" text-anchor="middle" font-size="11.5" fill="#6b7480">one of 42 records</text>
+  <text x="160" y="410" text-anchor="middle" font-size="11.5" font-style="italic" fill="#6b7480">what you see</text>
+
+  <path d="M292,282 L332,282" fill="none" stroke="#9aa4af" stroke-width="1.8" marker-end="url(#z)"/>
+  <text x="312" y="266" text-anchor="middle" font-size="9.5" fill="#6b7480">instance of</text>
+
+  <!-- ============ 2 — its type ============ -->
+  <text x="342" y="106" font-size="12" font-weight="bold" fill="#9aa4af">ITS TYPE — declared once</text>
+  <rect x="342" y="116" width="316" height="332" rx="14" fill="#ffffff" stroke="#2f9e6b" stroke-width="2.5"/>
+  <rect x="366" y="140" width="268" height="34" rx="11" fill="#2f9e6b"/>
+  <text x="500" y="163" text-anchor="middle" font-size="14" font-weight="bold" fill="#ffffff">Type · Partner</text>
+
+  <text x="366" y="200" font-size="11" font-weight="bold" fill="#3f6b55">FIELDS</text>
+  <g font-size="11.5" fill="#1f2933">
+    <text x="366" y="222">name — text</text>
+    <text x="366" y="242">customer no. — text</text>
+    <text x="366" y="262">notice period — duration</text>
+    <text x="366" y="282">IBAN — checks itself</text>
+  </g>
+
+  <text x="366" y="314" font-size="11" font-weight="bold" fill="#3f6b55">RELATIONS</text>
+  <g font-size="11.5" fill="#1f2933">
+    <text x="366" y="336">has many Contract</text>
+    <text x="366" y="356">has many Invoice</text>
+  </g>
+
+  <text x="366" y="388" font-size="11" font-weight="bold" fill="#3f6b55">EFFECTS</text>
+  <rect x="366" y="398" width="122" height="24" rx="12" fill="#edf7f1" stroke="#2f9e6b" stroke-width="1.5"/>
+  <text x="427" y="414" text-anchor="middle" font-size="10.5" fill="#3f6b55">mark as checked</text>
+  <rect x="496" y="398" width="138" height="24" rx="12" fill="#fdf3e7" stroke="#e08a2b" stroke-width="1.5"/>
+  <text x="571" y="414" text-anchor="middle" font-size="10.5" fill="#a86518">switch tariff</text>
+  <path d="M508,405 v-3 a4,4 0 0 1 8,0 v3" fill="none" stroke="#a86518" stroke-width="1.6"/>
+  <rect x="507" y="405" width="10" height="8" rx="2" fill="#a86518"/>
+
+  <path d="M666,282 L706,282" fill="none" stroke="#9aa4af" stroke-width="1.8" marker-end="url(#z)"/>
+  <text x="686" y="266" text-anchor="middle" font-size="9.5" fill="#6b7480">one of</text>
+
+  <!-- ============ 3 — the model ============ -->
+  <text x="716" y="106" font-size="12" font-weight="bold" fill="#9aa4af">THE MODEL</text>
+  <rect x="716" y="116" width="248" height="332" rx="14" fill="#ffffff" stroke="#d8d3c8" stroke-width="2"/>
+  <g stroke="#2f9e6b" stroke-width="1.8">
+    <line x1="840" y1="176" x2="778" y2="240"/>
+    <line x1="840" y1="176" x2="902" y2="240"/>
+    <line x1="778" y1="240" x2="840" y2="304"/>
+    <line x1="902" y1="240" x2="840" y2="304"/>
+  </g>
+  <rect x="786" y="158" width="108" height="34" rx="11" fill="#2f9e6b" stroke="#2f9e6b" stroke-width="2"/>
+  <text x="840" y="180" text-anchor="middle" font-size="12" font-weight="bold" fill="#ffffff">Partner</text>
+  <g fill="#edf7f1" stroke="#2f9e6b" stroke-width="2">
+    <rect x="732" y="222" width="94" height="34" rx="11"/>
+    <rect x="854" y="222" width="94" height="34" rx="11"/>
+    <rect x="786" y="286" width="108" height="34" rx="11"/>
+  </g>
+  <g font-size="12" font-weight="bold" fill="#1f2933" text-anchor="middle">
+    <text x="779" y="244">Contract</text>
+    <text x="901" y="244">Invoice</text>
+    <text x="840" y="308">Payment</text>
+  </g>
+  <text x="840" y="352" text-anchor="middle" font-size="11.5" fill="#6b7480">and the rest of your domain</text>
+  <text x="840" y="410" text-anchor="middle" font-size="11.5" font-style="italic" fill="#6b7480">what everything is derived from</text>
+
+  <text x="500" y="492" text-anchor="middle" font-size="13" fill="#1f2933">Every answer, every app, every worker reads this one declaration — nobody re-invents what a Partner is.</text>
+  <text x="500" y="524" text-anchor="middle" font-size="13" font-style="italic" fill="#1f2933">Records come and go. The ontology is what stays.</text>
+</svg>

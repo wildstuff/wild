@@ -1,0 +1,50 @@
+# Minimal WORKLOAD-flavor Tier-2 plugin example — the wake-on-subscription
+# → deterministic work → publish-outcome shape. No LLM, no external
+# services.
+#
+# Standalone — NOT a member of the host workspace (the wasm32 target
+# would otherwise pull host-target deps into the embedded host's build;
+# see plugins/workers/ai-worker/Cargo.toml for the full rationale).
+# Build it explicitly with `./build.sh`.
+[workspace]
+
+[package]
+name         = "annotate-worker"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.97.0"
+license      = "Apache-2.0"
+repository   = "https://github.com/wildstuff/the-wild"
+description  = "Example workload-flavor worker — wakes on a NATS task, annotates the prompt deterministically, publishes a worker result event (Tier-2 plugin)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "=0.58.0", features = ["async-spawn"] }
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+# The result envelope carries a fresh message id + an ISO-8601 timestamp
+# (the host's `Envelope` wire shape). Both crates support wasm32-wasip2:
+# uuid v4 draws from the WASI random source, chrono reads the WASI clock.
+uuid        = { version = "1", features = ["v4", "serde"] }
+chrono      = { version = "0.4", features = ["serde"] }
+
+# Wasm components are single-threaded; no tokio.
+
+[package.metadata.component]
+package = "wildstuff:annotate-worker"
+
+[package.metadata.component.target]
+path  = "wit"
+world = "annotate-worker"
+
+# WIT-package deps for the world's imports + exports. Path deps straight
+# at the canonical text-WIT under `wit/<pkg>/`. The wit-bindgen macro
+# ALSO reads `wit/deps/<name>/` next to `wit/world.wit` (checked-in
+# symlinks resolving to the same files), so both surfaces have to agree
+# — see ./wit/deps/.
+[package.metadata.component.target.dependencies]
+"wild:plugin-meta" = { path = "../../../wit/plugin-meta/plugin-meta.wit" }
+"wild:worker"      = { path = "../../../wit/worker/worker.wit" }
+"wild:messaging"   = { path = "../../../wit/messaging/messaging.wit" }

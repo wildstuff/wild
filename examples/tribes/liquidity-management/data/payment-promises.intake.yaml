@@ -1,0 +1,8 @@
+# Intake mapping for the payment-promises seed.
+# `payment_promise` is key_strategy: uuid (autokey). The seed rows carry an
+# explicit `id` (promoted on Upsert), giving the customer Domain REST stable
+# GET-by-key targets out of the box; a customer `create` over REST omits the id
+# and the store mints one (`key_strategy: uuid`).
+target_type: payment_promise
+key: [id]
+columns: [id, invoice_id, promised_date, promised_amount, status, note]

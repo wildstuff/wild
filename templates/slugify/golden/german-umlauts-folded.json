@@ -1,0 +1,10 @@
+{
+  "tool": "slugify",
+  "input": {
+    "text": "Grüße Über Ärger Straße"
+  },
+  "expected": {
+    "slug": "gruesse-ueber-aerger-strasse"
+  },
+  "match": "exact"
+}

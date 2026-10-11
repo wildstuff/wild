@@ -1,0 +1,28 @@
+# `wild tribe apply <bundle> --as <id>` reads this. Schema:
+# `crates/runtime/wild-tribe-ops/src/bundle.rs::BundleManifest`.
+#
+# ADR-0171 Phase 2.4.5 example: the complete single-document Content Flow —
+# an invoice PDF dropped into a folder source is extracted, paused at a
+# `does: review, using: confirm` stage for operator confirmation, admitted
+# through the governed `ingest-candidates` sink, and announced with a
+# `notify-operator` notice. The scripted `extract-worker` stand-in makes the
+# whole flow LLM-free and deterministic for the acceptance test.
+schema_version: "1"
+
+name: invoice-capture
+description: >-
+  LLM-free end-to-end example for the ADR-0171 Content Flow lifecycle:
+  capture -> extract -> confirm (operator pause) -> file -> notify.
+
+parent_tribe: root
+
+authoring_method: ddd
+
+# The stand-in is uploaded to the daemon's component-type catalog by the
+# fixture script before `tribe apply`; the manifest only declares the
+# dependency so the deploy gate resolves the worker's image.
+external_components:
+  - scripted-extract-worker
+
+workers:
+  - { ref: "workers/extract-stand-in.md" }

@@ -1,0 +1,8 @@
+log_id,date,exercise_id,duration_min,kcal_burned,intensity,notes
+WL-2026-0001,2026-06-20,running-10kmh,30,351.00,moderate,morning run
+WL-2026-0002,2026-06-21,strength-training,45,270.00,moderate,upper body
+WL-2026-0003,2026-06-22,cycling-moderate,40,320.00,moderate,
+WL-2026-0004,2026-06-23,hiit,20,250.00,hard,
+WL-2026-0005,2026-06-24,walking-brisk,60,300.00,easy,lunch walk
+WL-2026-0006,2026-06-25,swimming,30,294.00,moderate,
+WL-2026-0007,2026-06-26,yoga,50,150.00,easy,recovery

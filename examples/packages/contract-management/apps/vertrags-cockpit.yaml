@@ -1,0 +1,56 @@
+# ADR-0156 PR2 — the package's APP TEMPLATE (an ADR-0154 app spec): the
+# default end-user door over the contract domain. Every slug resolves against
+# `../ontology/model.yaml` (entities `vertrag`/`vertragspartner`, projection
+# `vertragsbestand`, effect `kuendigen`); the reading (labels, formats,
+# titles) comes from the ontology's ADR-0155 marks — this file only composes.
+
+id: vertrags-cockpit
+name: Vertrags-Cockpit
+branding:
+  accent: teal
+
+pages:
+  - id: uebersicht
+    title: Überblick
+    views:
+      - id: entgelt-tile
+        type: kpi-tile
+        projection: vertragsbestand
+        measure: jahresentgelt_summe
+        label: Jahresentgelt (Bestand)
+        format: "currency:EUR"
+      - id: bestand-chart
+        type: chart
+        projection: vertragsbestand
+        x: vertragsart
+        y:
+          - jahresentgelt_summe
+        shape: bar
+        exportable: true
+
+  - id: vertraege
+    title: Verträge
+    views:
+      - id: vertragsliste
+        type: table
+        source: entity
+        entity: vertrag
+        exportable: true
+        personalizable: true
+      - id: vertrag-detail
+        type: detail-card
+        entity: vertrag
+      - id: kuendigen-form
+        type: effect-form
+        effect: kuendigen
+
+  - id: partner
+    title: Partner
+    views:
+      - id: partnerliste
+        type: table
+        source: entity
+        entity: vertragspartner
+      - id: partner-chat
+        type: chat-panel
+        placeholder: Fragen Sie nach Verträgen oder Partnern.

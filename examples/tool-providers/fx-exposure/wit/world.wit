@@ -1,0 +1,36 @@
+// `fx-exposure` — ADR-0202 D5, the two-axis Procedure.
+//
+// A foreign-currency receivable valuation with a fitted uncertainty band,
+// exported through the ADR-0082 Function seam (`wild:function/backing`) so a
+// declared field can name it with `backed_by: fx_exposure_valuation`, and
+// through `wild:tool-provider/tools` so an operator can ask it directly.
+//
+// **The empty import list is the point, and here it is load-bearing twice.**
+//
+// A fitted model carries its parameters, so it reads no clock and touches no
+// lake — the same determinism claim its two siblings make. But this Procedure
+// also needs a MARKET RATE, and it is exactly the kind of component that
+// would reach for the network to get one. It may not: the ADR-0202 D10.3
+// allow-list carries no `wasi:sockets`, no `wasi:http` and no `wild:http`, so
+// the impure half MUST be a connector and the rate MUST arrive as a field.
+//
+// That constraint reads like an inconvenience and is the feature. A model
+// that fetched its own inputs could answer differently on two runs with
+// nothing recorded to explain the difference; because the rate arrives as
+// data, the snapshot it was anchored to is on the row where an auditor can
+// find it.
+//
+// The Rust standard library still links `wasi:io`, the `wasi:cli` stdio
+// surface, `wasi:clocks/monotonic-clock` and `wasi:random/insecure-seed` into
+// every component — the measured floor the profile admits, and nothing here
+// reaches past it.
+
+package wildstuff:fx-exposure@0.1.0;
+
+world fx-exposure {
+    include wild:plugin-meta/plugin-base@0.3.0;
+
+    // ── Compute primitives ──
+    export wild:tool-provider/tools@0.4.0;
+    export wild:function/backing@0.1.0;
+}

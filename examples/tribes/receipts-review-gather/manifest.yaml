@@ -1,0 +1,24 @@
+# `wild tribe apply <bundle> --as <id>` reads this. Schema:
+# `crates/runtime/wild-tribe-ops/src/bundle.rs::BundleManifest`.
+#
+# The agentic gather-flow fixture bundle: one folder source whose per-file
+# fan-out children each pause on an agentic `review` step (a scripted worker
+# stand-in), resume from the bus, and then arrive at the ADR-0128 `gather`
+# barrier. One operator notice goes out for the whole batch. Zero LLM calls.
+schema_version: "1"
+name: receipts-review-gather
+description: >-
+  Receipts folder intake with an agentic review step inside each per-file
+  child run, then a gather barrier that collapses the batch into one operator
+  notice — the first e2e proof of resumed agentic arrivals feeding a join.
+authoring_method: ddd
+parent_tribe: root
+
+# The scripted stand-in is uploaded to the daemon's component-type catalog by
+# the fixture script before `tribe apply`; the manifest only declares the
+# dependency so the deploy gate resolves the worker's image.
+external_components:
+  - scripted-worker
+
+workers:
+  - { ref: "workers/receipt-review-stand-in.md" }

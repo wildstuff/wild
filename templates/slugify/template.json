@@ -1,0 +1,18 @@
+{
+  "name": "slugify",
+  "version": "0.1.3",
+  "tools": [
+    "slugify"
+  ],
+  "flavor": "tool-provider",
+  "wit_baseline": "wild:tool-provider@0.4.0",
+  "artifact": {
+    "digest": "sha256:beea14ed3f5ad129174245161158e6b863e59371bcc62c929c7a67cc35a994c3",
+    "built_in": {
+      "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+      "target": "wasm32-wasip2",
+      "toolchain_reference": "1.97.0-26c2e7777c64-nt0.9.143",
+      "toolchain_digest": "a73899ba7a7c1d000f952016ea362414bd2fab75dfbecb3a855c61cd6df5c695"
+    }
+  }
+}

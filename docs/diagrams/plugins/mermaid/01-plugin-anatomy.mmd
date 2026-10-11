@@ -1,0 +1,10 @@
+flowchart LR
+    subgraph artefact["One plugin — two artefacts"]
+        Wasm["Component<br/>(.wasm — the code)"]
+        Sidecar["Sidecar<br/>(.json — signed identity)"]
+    end
+    Sidecar -. "pins the digest of" .-> Wasm
+    artefact --> Cache["plugin cache<br/>(your profile)"]
+    Cache --> Gate{"trust gate<br/>which caps may it hold?"}
+    Gate --> Host["host wires the imports<br/>it is allowed"]
+    Host --> Tribe[("the plugin serves<br/>your Tribes")]

@@ -1,0 +1,164 @@
+// `wild:operator-channel` — ADR-0044 V1: the outbound seam Elder uses to
+// REACH the operator, and the inbound shape a channel plugin renders.
+//
+// Direction (read this first — it is INVERSE to `wild:data`):
+//
+//   - A **channel plugin** (Telegram, Slack, Email, …; Tier-2 Wasm) is the
+//     PROVIDER: it `export`s `channel`. The **host** is the CONSUMER: it
+//     calls `deliver()` to push a notification out, and `capabilities()`
+//     to learn what the surface can render. This mirrors
+//     `wild:tool-provider` (guest exports `tools`, host calls them), NOT
+//     `wild:data` (host implements, guest imports).
+//
+//   - Therefore the host-tree world (`operator-channel-host`) is
+//     `export channel` — bindgen generates typed `call_deliver` /
+//     `call_capabilities` the host invokes against the instantiated guest.
+//
+// Pull vs push is a capability, not a type (ADR-0044 retires ADR-0019's
+// "surfaces are not channels" split): every channel declares
+// `channel-kind` via `capabilities()`.
+//
+//   - `pull` (MCP, `wild watch`): the operator polls the channel's own
+//     surface (inbox list, dashboard). `deliver()` updates channel-local
+//     state and registers NO delivery-receipt — the operator sees current
+//     state on the next poll.
+//   - `push` (Telegram, Slack, Email, SMS): the channel actively pings the
+//     operator's external endpoint; each `deliver()` returns a
+//     `delivery-receipt` so fallback channels know what's already been tried.
+//
+// V1 status: the in-tree MCP/REST channels are host-NATIVE (not Wasm
+// guests) and implement the host-side `OperatorChannel` trait that mirrors
+// this contract. This WIT pins the shape the first real Tier-2 PUSH plugin
+// (Telegram) will export. A future Telegram guest world composes:
+//
+//   world telegram-channel-plugin {
+//       include wild:plugin-meta/plugin-base@0.3.0;
+//       import wild:secrets/store@0.1.0;          // bot token, chat id
+//       import wasi:http/outgoing-handler@0.2.0;  // Telegram Bot API
+//       export wild:operator-channel/channel@0.1.0;
+//   }
+//
+// That composition lives in the PLUGIN's own wit/world.wit (it pulls in
+// foreign packages); this canonical package stays import-free so the
+// host-tree copy is a clean symlink, not a trimmed mirror.
+
+package wild:operator-channel@0.1.0;
+
+interface channel {
+    /// How severe / time-critical the notification is. Drives ELDER.md
+    /// routing (which channels a given severity fans out to).
+    enum severity {
+        blocker,
+        warning,
+        info,
+        help-needed,
+    }
+
+    /// What KIND of operator-facing event this is. Lets a channel render
+    /// differently (a help-request wants a reply; a system-notice does not).
+    enum kind {
+        audit-finding,
+        help-request,
+        system-notice,
+    }
+
+    /// Sensitivity of the body. A push channel over a less-trusted
+    /// transport (SMS, third-party chat) MAY drop `tribe-scoped` / `secret`
+    /// bodies and send only the `deeplink`.
+    enum pii-class {
+        public,
+        tribe-scoped,
+        secret,
+    }
+
+    /// What picking an action MEANS, so a channel can map it to its native
+    /// affordance (inline button, reply keyword, deep link).
+    enum action-semantics {
+        fix,
+        ack,
+        reject,
+        answer-option,
+        deeplink,
+    }
+
+    /// One resolution the operator can pick. `action-id` is what an inbound
+    /// reply carries back (it converges on the existing `inbox_resolve` /
+    /// `decision_resolve` domain seam — see ADR-0044 §inbound).
+    record action {
+        action-id: string,
+        label: string,
+        semantics: action-semantics,
+    }
+
+    /// The outbound payload the host hands a channel to render + deliver.
+    /// `notification-id` is deterministic over (source-id, state) so a
+    /// redelivery is idempotent rather than a duplicate ping.
+    record notification {
+        notification-id: string,
+        tribe-id: string,
+        severity: severity,
+        kind: kind,
+        title: string,
+        // Markdown source; the channel renders to its native format
+        // (Telegram MarkdownV2, plain-text SMS, MIME HTML, …).
+        body-md: string,
+        actions: list<action>,
+        // `wild://…` URI to the full inbox view; the only thing a
+        // pii-restricted push channel is guaranteed to send.
+        deeplink: option<string>,
+        pii-class: pii-class,
+    }
+
+    /// Returned by a PUSH channel on a successful `deliver()`. Pull channels
+    /// return this too but the host does not persist it as a receipt.
+    record delivery-receipt {
+        // Epoch milliseconds (WIT has no timestamp type; ms is the
+        // daemon-wide convention).
+        delivered-at: u64,
+        // For back-correlating an inbound reply to the pushed message.
+        channel-message-id: option<string>,
+        // The channel had to truncate the body to fit `max-body-chars`.
+        rendered-truncated: bool,
+    }
+
+    /// pull = MCP / `wild watch`; push = Telegram / Slack / Email / SMS.
+    enum channel-kind {
+        pull,
+        push,
+    }
+
+    /// What a channel's surface can render. Elder pre-filters notifications
+    /// that would degrade poorly (e.g. inline actions over plain SMS).
+    record channel-capabilities {
+        kind: channel-kind,
+        supports-rich-markdown: bool,
+        supports-inline-actions: bool,
+        max-body-chars: u32,
+        rate-limit-per-minute: option<u32>,
+    }
+
+    /// Why a delivery failed. The host's distributor reacts differently:
+    /// retry-via-fallback on `unavailable`, give-up on `permanent`,
+    /// back-off `n` seconds on `rate-limited`.
+    variant channel-error {
+        unavailable(string),
+        permanent(string),
+        rate-limited(u32),
+    }
+
+    /// Push one notification to the operator. Idempotent by
+    /// `notification.notification-id`.
+    ///
+    /// `config` is the operator's channel-private binding for THIS
+    /// notification's `(channel-token, tribe)` — the host resolves it from
+    /// `system/channels.yaml` per delivery (so an operator edit takes effect
+    /// with no restart) and passes the matching entry's `config` map through
+    /// as key→value pairs. The channel reads its own keys (a push channel:
+    /// its recipient, e.g. `operator-chat-id`; secrets stay `wild:secrets`
+    /// aliases named here, never values). Empty when the tribe has no binding
+    /// for this channel — the channel then reports a skip, never a wrong send.
+    deliver: func(n: notification, config: list<tuple<string, string>>) -> result<delivery-receipt, channel-error>;
+
+    /// What this channel surface can render. Host-polled to drive routing.
+    capabilities: func() -> channel-capabilities;
+}
