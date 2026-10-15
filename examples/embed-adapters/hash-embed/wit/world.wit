@@ -1,0 +1,22 @@
+// `hash-embed` — deterministic teaching adapter for the Tier-2
+// embed-adapter contract.
+//
+// Composes `wild:embed-adapter/embed-adapter-plugin@0.1.0` verbatim —
+// the same world the shipping adapters (`ollama-embed`, `llama-embed`)
+// build on. The include inherits:
+//
+//   - `wild:plugin-meta/plugin-base@0.3.0` — the meta lifecycle
+//     (`manifest` / `init` / `shutdown`) every Tier-2 plugin exports.
+//   - `import wild:secrets/store@0.1.0` and
+//     `import wild:http/outbound@0.1.0` — the typical embed-adapter
+//     imports. This sample calls NEITHER (no network, no secrets);
+//     wit-bindgen tree-shakes uncalled imports out of the built
+//     component, so the binary imports nothing.
+//   - `export embed` — `info()` (the capability profile) and the
+//     one-shot batch `embed()` call. Embeddings have no streaming
+//     sibling, so this is the whole export surface.
+package wildstuff:hash-embed@0.1.0;
+
+world hash-embed {
+    include wild:embed-adapter/embed-adapter-plugin@0.1.0;
+}

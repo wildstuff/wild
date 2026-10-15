@@ -1,0 +1,8 @@
+flowchart LR
+    You(["You"]) <-->|"chat"| AI["Your Desktop AI"]
+    AI <-->|"MCP"| Elder["🧙 Elder"]
+    Elder -->|"Intake: spawn"| New["new Tribe"]
+    Elder -->|"Mentor: shape"| Spec["a Tribe's charter"]
+    Elder -->|"Operate: change"| Run["a running Tribe"]
+    Run -->|"notify: something<br/>material happened"| Elder
+    Elder -->|"surfaces back"| AI

@@ -1,0 +1,20 @@
+# Intake mapping for the INBOUND invoice feed (supplier invoices we received).
+# Distinct shape from the outbound feed (`supplier_id` instead of
+# `customer_id`, plus the cash-discount columns), so a distinct fingerprint → its own
+# `intake_config` record. `direction` is the per-file constant `inbound`.
+target_type: invoice
+key: [invoice_id]
+columns: [invoice_id, issued_date, due_date, paid_date, amount, currency, supplier_id, status, payment_terms_days, cash_discount_percent, cash_discount_days]
+mapping:
+  - { column: invoice_id, field: invoice_id, ty: text }
+  - { column: issued_date, field: issued_date, ty: date }
+  - { column: due_date, field: due_date, ty: date }
+  - { column: paid_date, field: paid_date, ty: date }
+  - { column: amount, field: amount, ty: decimal }
+  - { column: currency, field: currency, ty: text }
+  - { column: supplier_id, field: partner_id, ty: text }     # rename
+  - { column: status, field: status, ty: text }
+  - { column: payment_terms_days, field: payment_terms_days, ty: int }
+  - { column: cash_discount_percent, field: cash_discount_percent, ty: int }
+  - { column: cash_discount_days, field: cash_discount_days, ty: int }
+  - { field: direction, value: inbound, ty: text }           # per-file constant

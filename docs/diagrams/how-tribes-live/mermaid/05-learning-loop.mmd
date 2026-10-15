@@ -1,0 +1,9 @@
+flowchart LR
+    Work["Chief works a cycle"] --> Reflect["Reflect:<br/>a lesson + an outcome score emerge"]
+    Reflect -->|"record"| Store[("learnings + outcome history<br/>(scored, never overwritten)")]
+    Store -->|"injected next cycle"| Recall["Next cycle:<br/>prior outcomes + lessons<br/>pushed in, no asking"]
+    Recall --> Work
+    Store -.->|"mirrored up"| Commons[("Fleet commons<br/>root lake")]
+    Commons -.->|"other Tribes' lessons"| Recall
+    note["efficacy check at reflect:<br/>a lesson whose later outcomes<br/>stayed low → reconsider it"]
+    Store -.- note

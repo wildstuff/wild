@@ -1,0 +1,27 @@
+# `wild tribe apply <bundle> --as <id>` reads this. Schema:
+# `crates/runtime/wild-tribe-ops/src/bundle.rs::BundleManifest`.
+#
+# Minimal DDD bundle for fixture 06: a DOCUMENT source whose default fold
+# becomes [ingest, extract, ingest-candidates], with the `extract` stage
+# dispatched to a scripted Wasm stand-in under the `extract-worker` mechanism
+# token. Deterministic, LLM-free, exercises the document door end to end.
+schema_version: "1"
+
+name: invoice-scans-extract
+description: >-
+  LLM-free end-to-end fixture for the document connector: inbound invoice PDFs
+  are extracted per file into `supplier_invoice` records through a scripted
+  stand-in for the built-in extract-worker.
+
+parent_tribe: root
+
+authoring_method: ddd
+
+# The stand-in is uploaded to the daemon's component-type catalog by the
+# fixture script before `tribe apply`; the manifest only declares the
+# dependency so the deploy gate resolves the worker's image.
+external_components:
+  - scripted-extract-worker
+
+workers:
+  - { ref: "workers/extract-stand-in.md" }

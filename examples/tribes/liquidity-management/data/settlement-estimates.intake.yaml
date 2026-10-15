@@ -1,0 +1,23 @@
+# Intake mapping for the ADR-0202 D5 per-invoice settlement seed.
+#
+# It exists because a `data/*.csv` is matched to a target type by the
+# FINGERPRINT of its header, and that fingerprint is only registered by an
+# `.intake.yaml` beside it. A CSV without this file is skipped — named, with
+# its reason — and the apply FAILS instead of deploying green around the hole
+# (`--allow-holes` opts into a partial seed deliberately).
+#
+# 1:1 with `settlement_estimate`, so auto-intake: only
+# `{target_type, columns, key}` ships and the records lane derives the identity
+# map. `settlement_estimate` is an AUTHORED type, so the write is an Upsert and
+# no recurring source is expected for it — which is also why the "the model
+# declares no source for this fingerprint" warning is deliberately silent here.
+target_type: settlement_estimate
+# Both key parts, matching the type's identity. A partial key would join every
+# estimate onto one truncated row rather than refusing.
+key: [invoice_id, procedure_version]
+# The exact CSV header, and NOTE what is absent: every field the Procedure
+# answers — `expected_payment_date`, `expected_delay_days`, `delay_spread_days`,
+# `delay_basis`. The seed ships the QUESTION (which invoice, whose, due when,
+# how much) and the Procedure fills the answer at the ingest boundary. Adding
+# any of those columns here would mean the seed answered its own question.
+columns: [invoice_id, partner_id, due_date, amount, currency, procedure_version]

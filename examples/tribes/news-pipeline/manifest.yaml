@@ -1,0 +1,32 @@
+# news-pipeline — one source, two formats.
+#
+# Pulls the Hacker News front page once per hour and turns the same raw
+# feed into two independent artefacts:
+#   1. a concise B2B marketing brief, and
+#   2. a 150-word microfiction vignette.
+#
+# The point is to show how a single data source can feed multiple
+# downstream workers with different personas and output shapes.
+#
+# Deploy:
+#   wild --profile demo tribe apply examples/tribes/news-pipeline/
+#
+
+schema_version: "1"
+name: news-pipeline
+description: |
+  Hourly Hacker News front-page scan producing two artefacts from the
+  same feed: a B2B marketing brief and a microfiction vignette.
+parent_tribe: root
+
+# One hourly tick for the whole pipeline.
+schedule: "0 * * * *"
+
+# No `default_model:` — the chief routes to your configured default LLM adapter
+# at dispatch, so this bundle applies cleanly regardless of LLM setup. Pin one
+# with `default_model: <id>` (an id from `wild config llm list`) if you want.
+
+workers:
+  - ref: workers/headline-fetcher.md
+  - ref: workers/summarizer.md
+  - ref: workers/story-weaver.md

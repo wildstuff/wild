@@ -1,0 +1,357 @@
+# ADR-0154 — the operator-published end-user app for the fitness tribe: the
+# CLIENT's own surface over their energy ledger. FS-canonical (a sibling of
+# `ontology/`, `specs/`, `data/`); `wild tribe apply` copies it into
+# `<profile>/apps/` and stamps it with the tribe you applied as.
+#
+# The sibling showcase (`examples/tribes/liquidity-management/apps/`) is written
+# for an OPERATOR looking at a business. This one is written for the person the
+# data is about, and that difference is visible in every choice below: a
+# `comfortable` density instead of a dense grid, four pages that follow the
+# day (what went in, what went out, what to cook, what the goal is) instead of
+# a view-kind tour, and a coach panel rather than a governed effect wall.
+#
+# Every slug RESOLVES against `../ontology/model.yaml`:
+#   entities    — food_log, workout_log, food, exercise, recipe, goal, profile
+#   projections — daily_intake, daily_burn, food_frequency
+#   effects     — set_calorie_goal, set_profile
+# The presentation (column order, titles, units) comes from the model's reading
+# marks (ADR-0155), not from this file — this file composes.
+#
+# Validate with: wild app validate apps/energy-balance.yaml
+
+id: energy-balance
+name: Energy Balance
+
+# NO `default_tribe:` ON PURPOSE. Absent, every unmarked view binds the CARRIER
+# — the tribe the app is published under — so `--as alice-fitness` (the README's
+# one-base-many-clients pattern) deploys correctly under any id. Naming a tribe
+# literally here would 404 the app for every customer token scoped to the real
+# deployment the moment someone renames it.
+
+branding:
+  # ADR-0175 G11 — a tiny inline-SVG logo (data-URI, an open token the renderer
+  # resolves). Keeps the bundle self-contained; no external asset fetch.
+  logo: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='9' fill='none' stroke='%23238636' stroke-width='2.5'/><path d='M7 14l3-4 3 3 4-6' stroke='%23238636' stroke-width='2' fill='none' stroke-linecap='round'/></svg>"
+  accent: green
+  color_scheme: system
+  # ADR-0175 G11 — the density preset, chosen for the surface rather than left
+  # at the default: this is a phone-first client app where a logged meal is a
+  # tap target, so it takes the roomiest of the three (`comfortable` multiplies
+  # the spacing ladder by 1.15). The liquidity cockpit takes `compact` for the
+  # opposite reason and the report stays `normal` — one preset per surface.
+  #
+  # Worth knowing while reading this: the preset was INERT until 2026-08-04. It
+  # was a stylesheet rule (`.wv-density-comfortable`) competing with the
+  # `--wv-spacing-scale` the renderer writes INLINE, and inline custom
+  # properties beat class rules — so it painted nothing. It now composes into
+  # that one value, which is why setting it here is a decision rather than a
+  # label.
+  density: comfortable
+  radius: 12
+  # The type scale nudged up a notch: a number read at arm's length on a phone,
+  # not a table scanned on a desktop. Multiplies the whole type ladder — every
+  # font size in the renderer is a rung on it, so nothing is left behind.
+  font_scale: 1.05
+  palette:
+    primary: green
+    success: green
+    warning: amber
+    danger: red
+    surface: gray
+
+pages:
+  # ── Balance: the two sides of the ledger, and their week ──────────────────
+  - id: balance
+    title: Balance
+    onboarding:
+      title: Your energy ledger
+      message: >-
+        Two numbers, one question: what went in (food) against what went out
+        (movement). The sparkline beside each figure is the last seven days, so
+        a single heavy day reads as a day rather than as a trend. What you ate
+        is under "Food", what you did under "Training", and your target under
+        "Goal".
+      when: first_visit
+    # ADR-0175 G9 — the two figures side by side, then each week full width; one
+    # column on a phone, in the same order.
+    layout:
+      type: grid
+      columns: ["1fr", "1fr"]
+      gap: 16
+      areas:
+        - "intake burn"
+        - "intakeweek intakeweek"
+        - "burnweek burnweek"
+      cells:
+        - { view: intake-tile, area: intake }
+        - { view: burn-tile, area: burn }
+        - { view: intake-week, area: intakeweek, wide: true }
+        - { view: burn-week, area: burnweek, wide: true }
+      breakpoints:
+        - name: mobile
+          columns: ["1fr"]
+          areas:
+            - "intake"
+            - "burn"
+            - "intakeweek"
+            - "burnweek"
+    views:
+      # view — calories IN. ADR-0189 D7: the `trend` block folds the SAME
+      # measure into daily buckets along the projection's own `date` field and
+      # draws it as a sparkline beside the figure. `daily_intake` can carry one
+      # because it keys on a date; a projection keyed on a category (the
+      # liquidity report's `invoice_book`) has no clock to fold over.
+      #
+      # THE FIGURE AND THE SPARKLINE ANSWER DIFFERENT QUESTIONS. The figure sums
+      # the measure across every row of the projection — every day ever logged —
+      # while the sparkline is the seven buckets below. Read as "the ledger, and
+      # its last week".
+      #
+      # `start` is an absolute date, deliberately: it names the REAL period the
+      # seeded `data/food-log.csv` covers (2026-06-20 … 2026-06-26). Logging
+      # your own entries? Swap it for the intent token — `start: today-1w` — and
+      # the window follows the clock for good, resolved host-side where the read
+      # is served.
+      - id: intake-tile
+        type: kpi-tile
+        projection: daily_intake
+        measure: total_kcal_in
+        label: Calories in
+        trend:
+          over: date
+          by: day
+          start: "2026-06-20"
+          buckets: 7
+        # ADR-0209 S1 — the Tier-2 style override: CLOSED colour tokens, never a
+        # hex. It shadows the card's accent for this view's scope, which is what
+        # the sparkline paints with. App-wide colours stay in `branding`.
+        style:
+          palette: [green]
+
+      # view — calories OUT, the mirror of the tile above, in its own hue so the
+      # two are never mistaken for halves of one bar.
+      - id: burn-tile
+        type: kpi-tile
+        projection: daily_burn
+        measure: total_kcal_out
+        label: Calories out
+        trend:
+          over: date
+          by: day
+          start: "2026-06-20"
+          buckets: 7
+        style:
+          palette: [blue]
+
+      # view — the week as a chart. ONE measure per chart is not a style choice:
+      # the read plan folds `y[0]` and only `y[0]`, and the renderer draws a
+      # single series. A second entry under `y:` parses and then never reaches a
+      # pixel, so intake and burn are two charts rather than one stacked lie.
+      #
+      # `window:` turns the read into a TimeBucket fold: 7 consecutive 1-day
+      # buckets from the start date, summing the measure inside each.
+      - id: intake-week
+        type: chart
+        projection: daily_intake
+        x: date
+        y: [total_kcal_in]
+        shape: bar
+        exportable: true
+        window:
+          start: "2026-06-20"
+          bucket_days: 1
+          buckets: 7
+        style:
+          palette: [green]
+
+      - id: burn-week
+        type: chart
+        projection: daily_burn
+        x: date
+        y: [total_kcal_out]
+        shape: line
+        exportable: true
+        window:
+          start: "2026-06-20"
+          bucket_days: 1
+          buckets: 7
+        style:
+          palette: [blue]
+
+  # ── Food: what was eaten, by day and by meal ──────────────────────────────
+  - id: nutrition
+    title: Food
+    views:
+      # view — the log itself. Personalizable, so the client keeps their own
+      # filtered view (ADR-0162 runtime ui_state) — "only breakfasts", "only
+      # this week".
+      - id: food-log
+        type: table
+        source: entity
+        entity: food_log
+        exportable: true
+        personalizable: true
+        empty_state:
+          title: Nothing logged yet
+          message: >-
+            Tell the coach what you ate — "200 g chicken breast for lunch" — and
+            the entry appears here. Foods it does not know yet it looks up first.
+          when: no_records
+
+      # view — the same entries as a BOARD (ADR-0175 G13), one lane per meal
+      # slot. `group_by` is spec-authored, never value-sniffed, and the lanes
+      # are the `meal` value set's four members in the order a day runs.
+      - id: meal-board
+        type: timeline
+        source: entity
+        entity: food_log
+        group_by: meal
+        lanes:
+          - breakfast
+          - lunch
+          - dinner
+          - snack
+
+      # view — what gets eaten most, from the `food_frequency` read-model. An
+      # explicit column allowlist (both are real projection fields); the
+      # `food_id` key comes along as the row identity.
+      - id: top-foods
+        type: table
+        source: projection
+        projection: food_frequency
+        columns:
+          - times_logged
+          - total_kcal
+
+      # view — the reference table the log joins against. 37 foods ship seeded,
+      # so the client can log from minute one.
+      - id: foods
+        type: table
+        source: entity
+        entity: food
+        exportable: true
+
+  # ── Training: what was done, and when ─────────────────────────────────────
+  - id: training
+    title: Training
+    views:
+      - id: workout-log
+        type: table
+        source: entity
+        entity: workout_log
+        exportable: true
+        personalizable: true
+        empty_state:
+          title: No workouts yet
+          message: >-
+            Tell the coach what you did — "30 minutes running" — and it computes
+            the burn from the exercise table and logs it here.
+          when: no_records
+
+      # view — the same workouts on a CALENDAR (ADR-0175 D11), placed on the day
+      # they happened: the rest days are the point, and a list cannot show a gap.
+      # A `gantt` needs two dates (start and end) and a workout has one, so the
+      # ontology offers `calendar` here and not `gantt`.
+      - id: workout-calendar
+        type: table
+        source: entity
+        entity: workout_log
+        representation: calendar
+        date_field: date
+
+      - id: exercises
+        type: table
+        source: entity
+        entity: exercise
+        exportable: true
+
+  # ── Recipes: the discovery half of the tribe ──────────────────────────────
+  - id: recipes
+    title: Recipes
+    views:
+      - id: recipe-list
+        type: table
+        source: entity
+        entity: recipe
+        exportable: true
+        personalizable: true
+        empty_state:
+          title: No recipes yet
+          message: >-
+            15 recipes ship with this tribe. New ones arrive through the recipe
+            intake frontier once the web search is armed — see the README.
+          when: no_records
+
+      # view — one recipe in full, wired to the list above (ADR-0175 D16
+      # cross-view `record_selected`). ADR-0209 S1 D12 — explicit field
+      # composition: exactly these fields, in this order. Every entry must exist
+      # on the bound entity; leaving `fields` out keeps the full reading-derived
+      # set, which for a 17-field type is a wall rather than a card.
+      - id: recipe-detail
+        type: detail-card
+        entity: recipe
+        record_source: recipe-list
+        fields:
+          - name
+          - kcal_per_serving
+          - protein_g
+          - carbs_g
+          - fat_g
+          - ingredients
+          - instructions
+          - source_url
+
+  # ── Goal & profile: the two things the client sets themselves ─────────────
+  - id: goal
+    title: Goal
+    views:
+      # view — a governed-effect form over a granted verb. NOT audience-gated,
+      # unlike the liquidity cockpit's verify form: in this tribe the customer
+      # IS the client, and the goal is theirs to set. The verb inherits
+      # `customer_visible` from its aggregate, which is what makes the form
+      # invocable rather than a submit button that 404s.
+      - id: set-goal
+        type: effect-form
+        effect: set_calorie_goal
+
+      - id: goals
+        type: table
+        source: entity
+        entity: goal
+
+      # view — the client profile as a card. No `record_source`: this tribe
+      # holds ONE profile (`--as <client>` names the instance), and a detail
+      # card with no wiring shows the first record — which here is the only one.
+      - id: profile-card
+        type: detail-card
+        entity: profile
+        fields:
+          - birth_year
+          - gender
+          - weight_kg
+          - height_cm
+
+      - id: set-profile
+        type: effect-form
+        effect: set_profile
+
+  # ── Search + coach ────────────────────────────────────────────────────────
+  - id: coach
+    title: Coach
+    views:
+      # view — global search across the three reference tables (ADR-0175 G13):
+      # "is there a recipe with lentils", "what burns most per minute".
+      - id: reference-search
+        type: search
+        placeholder: Search foods, exercises or recipes …
+        entities:
+          - food
+          - exercise
+          - recipe
+
+      # view — the customer tool-mode chat panel: the coach itself. Everything
+      # above is a read; this is where a client says what they ate and the chief
+      # does the looking-up, the computing and the logging.
+      - id: coach-chat
+        type: chat-panel
+        placeholder: What did you eat or do today?

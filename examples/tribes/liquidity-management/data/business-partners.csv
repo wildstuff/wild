@@ -1,0 +1,13 @@
+partner_id,name,role,iban,payment_terms_days,cash_discount_percent,cash_discount_days,city,notes,telegram_chat_id
+BP-001,Smith Corp,debtor,DE44500105175407324931,30,,,Berlin,Key account - largest revenue contributor,100200301
+BP-002,Brewer & Sons Ltd,debtor,DE62200700240000279500,14,,,Hamburg,Short payment terms - reliable payer,100200302
+BP-003,Little & Partners,debtor,DE26200400600087654300,30,,,Munich,Mid-tier consulting client,
+BP-004,Hoffman Trading Co,debtor,DE79345678901234567890,14,,,Cologne,Irregular payment behaviour - watch DSO,100200304
+BP-005,Nordwind Maritime GmbH,debtor,DE94200505500000778899,30,,,Bremen,Project-based - large single invoices,100200305
+BP-006,Weaver Consulting,debtor,DE78200400600012312300,30,,,Frankfurt,Reliable - always pays within terms,100200306
+BP-007,Aurora Labs Ltd,debtor,DE67701500000123456780,60,,,Stuttgart,New client since Q1 2026 - 60-day terms agreed,
+SUP-001,TechParts Inc,creditor,DE02120300000000202051,30,2,10,Stuttgart,Cash discount 2/10 net 30 - take it when possible,
+SUP-002,Logistics Express Ltd,creditor,DE80200400600004444400,30,,,Dortmund,No cash discount - negotiate terms in Q3,
+SUP-003,Miller Office,creditor,DE32700100800012345000,30,,,Berlin,Office supplies and rent - fixed monthly,
+SUP-004,Berlin City Utilities,creditor,DE58200400600971586400,30,,,Berlin,Utilities - fixed schedule,
+SUP-005,Hoffman Printing,creditor,DE03200400600022222200,30,2,10,Leipzig,Cash discount 2/10 - new supplier since May,

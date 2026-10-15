@@ -1,0 +1,4 @@
+# Auto-intake: columns map 1:1 onto the `exercise` type's fields.
+target_type: exercise
+key: [exercise_id]
+columns: [exercise_id, name, kcal_per_min, met, category, min_age, max_age, gender_suitability, level, source_url]

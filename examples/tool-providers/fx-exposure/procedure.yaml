@@ -1,0 +1,91 @@
+# ADR-0202 D4 — the model manifest for the `fx_exposure` Procedure.
+#
+# The audit card, and the first one in this repo with TWO axes.
+#
+# Its two siblings answer from their inputs alone: `cash_forecast` and
+# `payment_delay` are functions of what you hand them, so version + parameters
+# is the whole story and the card is complete on its own. This one is anchored
+# to a MARKET RATE that came from outside — a snapshot, on a date, fetched by
+# something else. Same model, same invoice, a rate from a different morning:
+# a different answer, correctly.
+#
+# So reproducing a stored valuation needs both axes, and neither lives wholly
+# here:
+#
+#   1. THE MODEL — `version` + `parameters` below. Fixed, in the binary,
+#      re-derivable from the extract this card names.
+#   2. THE ANCHOR — the rate and the date it was quoted, which arrive per call
+#      and are recorded on the ROW, not on this card. `rate_date` rides back
+#      out of every answer for exactly that reason.
+#
+# A card that named only the first would be describing a calculation nobody
+# can repeat. That is why the method sentence states the anchor requirement in
+# words rather than leaving it to be inferred from the field list.
+#
+# Every number under `parameters` is measured, not claimed: the tests in
+# `src/procedure.rs` re-derive each volatility and recompute `holdout.score` from
+# the extract named below, and fail if either drifts.
+---
+slug: fx_exposure
+version: v1
+method: >-
+  Foreign-currency receivable valuation with a fitted uncertainty band. The
+  euro amount is the receivable divided by the reference rate for its
+  currency — arithmetic, not a model. What is FITTED is one daily volatility
+  per currency: the standard deviation of the daily log change in that
+  currency's rate over the training window. The 80 % band over a horizon of d
+  calendar days is the rate times exp(±1.2816 × sigma × sqrt(round(d × 5/7)))
+  — a driftless random walk over trading days, inverted into euro terms, so
+  the band is wider on the upside than the downside. There is NO drift term:
+  a direction fitted on seven years of one currency pair is indistinguishable
+  from noise, and a Procedure claiming to know which way the dollar is going
+  would be confident where the data is silent. THE ANSWER IS ONLY DEFINED
+  RELATIVE TO A RATE SNAPSHOT, which arrives per call and is recorded on the
+  row together with its date; this card describes the model half only.
+parameters:
+  # The two-sided z-score. A JUDGEMENT, not a fit, and here so it can be
+  # argued with: 80 % means "one month in five lands outside this". 95 % was
+  # rejected because a 95 % band on a 30-day dollar move is too wide to plan
+  # against, and a band nobody acts on is a band nobody checks.
+  band_z: 1.2816
+  # Rates are quoted on business days, so a 30-calendar-day horizon spans 21
+  # moves, not 30. Baking this ratio rather than the horizon keeps the band
+  # correct for any horizon the caller asks for.
+  trading_days_per_calendar_day: 0.7142857142857143
+  currencies:
+    CHF:
+      daily_sigma: 0.002192
+      n: 1499
+    GBP:
+      daily_sigma: 0.003453
+      n: 1499
+    USD:
+      daily_sigma: 0.004512
+      n: 1499
+holdout:
+  # COVERAGE, not error — the honest metric for a band. The share of actual
+  # 30-day moves that landed inside the predicted band, over 1347 overlapping
+  # windows in the held-out 470 business days. The target is 0.80, and BOTH
+  # directions are wrong: a band covering 0.95 is not better, it is useless.
+  #
+  # 0.7595 is a real shortfall, and it is concentrated: CHF 0.7884, GBP
+  # 0.7817, USD 0.7082. The dollar band is too narrow over this holdout, which
+  # one realisation of a random walk can produce and which this card is not
+  # going to hide.
+  #
+  # The comparison matters more than the number. One flat +/-2 % band for every
+  # currency scores 0.7491 on the same windows — statistically indistinguishable
+  # from the fitted model IN AGGREGATE. Per currency it is 0.9577 for the franc
+  # (a margin so wide it says nothing) and 0.5145 for the dollar (a treasurer
+  # surprised half the time). The aggregate cannot tell the two apart at all;
+  # that is the finding, and it is asserted in the component's own tests.
+  metric: band_coverage_80
+  score: 0.7595
+  evaluated_at: 2026-08-12
+trained_on:
+  type: fx_rate
+  snapshot: eurofx-2019-2026
+  as_of: 2024-10-01
+source_ref:
+  spec: examples/tool-providers/fx-exposure
+  digest: sha256:bb8005d2f7bb4c22d6faa2df64d9700db624dee46e9c0349f1b2758591a4c8ff
