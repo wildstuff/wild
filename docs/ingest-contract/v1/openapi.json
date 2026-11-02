@@ -1,0 +1,1487 @@
+{
+  "components": {
+    "schemas": {
+      "AnnouncementReceipt": {
+        "description": "The reply to an announcement.",
+        "properties": {
+          "announcement": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/AnnouncementState"
+          }
+        },
+        "required": [
+          "announcement",
+          "profile",
+          "state"
+        ],
+        "title": "AnnouncementReceipt",
+        "type": "object"
+      },
+      "AnnouncementState": {
+        "description": "Where an announcement stands.",
+        "oneOf": [
+          {
+            "const": "pending",
+            "description": "Shown dashed in the atlas, waiting for the operator's answer.",
+            "type": "string"
+          },
+          {
+            "const": "activated",
+            "description": "Activated: the poll carries the producer key and first epoch once.",
+            "type": "string"
+          },
+          {
+            "const": "rejected",
+            "description": "The operator declined it.",
+            "type": "string"
+          },
+          {
+            "const": "revoked",
+            "description": "The operator cut this device off: its key no longer opens the door,\nand one it never fetched is never handed over. Terminal: stop polling\nand stop sending; only a new announcement the operator lets in again\npairs this install anew.",
+            "type": "string"
+          },
+          {
+            "const": "unknown",
+            "description": "A state this contract version does not know. Keep polling.",
+            "type": "string"
+          }
+        ]
+      },
+      "AnnouncementStatus": {
+        "description": "An announcement's state, as its poll reports it. `producer_key` and\n`epoch` are present exactly once, on the first poll after activation.",
+        "properties": {
+          "announcement": {
+            "type": "string"
+          },
+          "device": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "producer_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profile": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/AnnouncementState"
+          },
+          "tribe": {
+            "description": "The tribe the operator placed the producer in when saying yes, on\nevery poll from then on: the `{tribe}` of each route the key opens.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "announcement",
+          "profile",
+          "state"
+        ],
+        "title": "AnnouncementStatus",
+        "type": "object"
+      },
+      "BatchId": {
+        "description": "A batch's id: the lowercase hex SHA-256 of its decoded body.",
+        "type": "string"
+      },
+      "BatchReply": {
+        "description": "The reply to a batch: `202`.",
+        "properties": {
+          "batch": {
+            "$ref": "#/components/schemas/BatchId"
+          },
+          "commit_mark": {
+            "description": "The device's commit mark after this request: a counter of batches Wild\nhas received (D4a-R).",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "directives": {
+            "$ref": "#/components/schemas/Directives",
+            "default": {
+              "paused": false,
+              "vocabulary_changed": false
+            }
+          },
+          "pending": {
+            "default": [],
+            "description": "The states of the device's oldest pending batches, so a device rarely\nhas to ask (D3).",
+            "items": {
+              "$ref": "#/components/schemas/BatchStatus"
+            },
+            "type": "array"
+          },
+          "profile": {
+            "description": "The profile that answered (D1).",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/BatchState"
+          }
+        },
+        "required": [
+          "profile",
+          "batch",
+          "state",
+          "commit_mark"
+        ],
+        "title": "BatchReply",
+        "type": "object"
+      },
+      "BatchState": {
+        "description": "Where a batch stands.",
+        "oneOf": [
+          {
+            "const": "received",
+            "description": "Wild holds the batch durably and will run it through the source's\nflow. Drop it from the outbox.",
+            "type": "string"
+          },
+          {
+            "const": "processed",
+            "description": "The flow ran it through the sink. Lines Wild did not write as sent are\nlisted as conflicts. For information only.",
+            "type": "string"
+          },
+          {
+            "const": "failed",
+            "description": "The flow failed the batch. Wild keeps it in its dead-letter, tells the\noperator, and retries it from its receipt. For information only;\nnothing to re-send.",
+            "type": "string"
+          },
+          {
+            "const": "expired",
+            "description": "Wild held the batch and removed it together with its rows: its\nsource's retention ended, or the operator erased or retracted them.\nDrop it from the outbox and never send it again; a re-send is answered\n`expired` and writes nothing.",
+            "type": "string"
+          },
+          {
+            "const": "unknown",
+            "description": "The door does not know the batch, or a state this contract version\ndoes not know. Keep it; re-send it.",
+            "type": "string"
+          }
+        ]
+      },
+      "BatchStatus": {
+        "description": "One batch's state, as the status route reports it.",
+        "properties": {
+          "batch": {
+            "$ref": "#/components/schemas/BatchId"
+          },
+          "conflicts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Conflict"
+            },
+            "type": "array"
+          },
+          "state": {
+            "$ref": "#/components/schemas/BatchState"
+          }
+        },
+        "required": [
+          "batch",
+          "state"
+        ],
+        "title": "BatchStatus",
+        "type": "object"
+      },
+      "Conflict": {
+        "description": "One line of a received batch that the source's flow did not write as\nsent.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ConflictCode"
+          },
+          "line": {
+            "description": "The line's number in the batch body, counting from 1.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "params": {
+            "additionalProperties": true,
+            "default": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "line",
+          "code"
+        ],
+        "type": "object"
+      },
+      "ConflictCode": {
+        "description": "What the source's flow did with one line of a received batch instead of\nwriting it as sent. The other lines are written as sent (D0, D4). Every\ncode is information: none asks the producer to act or to re-send.",
+        "oneOf": [
+          {
+            "const": "source_rewrote_history",
+            "description": "A `natural` key already holds other values: the source changed its\nown history. The line is not written; Wild counts it on the device\nrecord and shows it in the inbox (D4).",
+            "type": "string"
+          },
+          {
+            "const": "generation_reassigned",
+            "description": "A `position` id already held other bytes — a restored file reached an\noffset sent before. Wild wrote the line under a generation it derived\nfrom the line itself (D4).",
+            "type": "string"
+          },
+          {
+            "const": "epoch_reassigned",
+            "description": "A `live` id already held other values — a restored copy reused an old\ncounter. Wild wrote the line under an epoch it derived from the line\nitself, and the reply's `new_epoch` directive hands the producer a\nfresh epoch for its next records (D4).",
+            "type": "string"
+          },
+          {
+            "const": "unknown",
+            "description": "A code this contract version does not know.",
+            "type": "string"
+          }
+        ]
+      },
+      "Directives": {
+        "description": "What the door tells a device on every reply (D1a): changes it should act\non without a second connection.",
+        "properties": {
+          "new_epoch": {
+            "description": "Use this epoch for the next `live` records: Wild assigned it after a\ncollision with a restored copy's counter (D4).",
+            "pattern": "^[0-9a-f]{32}$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paused": {
+            "default": false,
+            "description": "The operator paused this producer; keep collecting, send nothing.",
+            "type": "boolean"
+          },
+          "rotate_key": {
+            "description": "Rotate to this key; the old one verifies until the overlap ends (D2).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "send_interval_secs": {
+            "description": "Send no more often than this many seconds.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "vocabulary_changed": {
+            "default": false,
+            "description": "The vocabulary's ETag changed; fetch it again (D7).",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "Epoch": {
+        "description": "A new epoch for a producer's `live` records: a random 128-bit value as 32\nlowercase hex digits, never a counter, so a daemon restored from a backup can\nnever hand out an epoch it issued before (D4a-R).",
+        "properties": {
+          "epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "epoch"
+        ],
+        "title": "Epoch",
+        "type": "object"
+      },
+      "FieldDecl": {
+        "description": "One field of a shape.",
+        "oneOf": [
+          {
+            "description": "Text, at most `max_len` characters.",
+            "properties": {
+              "kind": {
+                "const": "text",
+                "type": "string"
+              },
+              "max_len": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "max_len"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A number.",
+            "properties": {
+              "kind": {
+                "const": "number",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "`true` or `false`.",
+            "properties": {
+              "kind": {
+                "const": "bool",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "An RFC 3339 timestamp, the record's own event time.",
+            "properties": {
+              "kind": {
+                "const": "timestamp",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The key of a record of another type. A reference keeps the target\ntype's own key; it is never prefixed with a device.",
+            "properties": {
+              "kind": {
+                "const": "reference",
+                "type": "string"
+              },
+              "target_type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "target_type"
+            ],
+            "type": "object"
+          }
+        ],
+        "properties": {
+          "description": {
+            "description": "What the field holds, in the operator's words: its meaning, its unit,\nan example (\"Estimated cost of the session in US dollars, e.g. 0.42\").\nWild carries it onto the table's field. Optional; at most 280\ncharacters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "required": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "KeyClass": {
+        "description": "How a shape's records get their ids.",
+        "oneOf": [
+          {
+            "const": "natural",
+            "description": "The id is the shape's declared key fields: a re-read writes nothing\nnew, and a record changed under its id is refused\n(`source_rewrote_history`).",
+            "type": "string"
+          },
+          {
+            "const": "position",
+            "description": "The id is an append-only file's generation and byte offset, in the\nreserved fields `_generation` (text) and `_offset` (a whole number); a\nrestored file's line is re-keyed by Wild (`generation_reassigned`).",
+            "type": "string"
+          },
+          {
+            "const": "live",
+            "description": "The id is a per-install epoch and counter, in the reserved fields\n`_epoch` and `_seq` (a whole number), for events seen only in the\nmoment; never backfilled.",
+            "type": "string"
+          }
+        ]
+      },
+      "Line": {
+        "description": "One line of a batch.",
+        "properties": {
+          "record": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "shape": {
+            "$ref": "#/components/schemas/ShapeRef"
+          }
+        },
+        "required": [
+          "shape",
+          "record"
+        ],
+        "title": "Line",
+        "type": "object"
+      },
+      "LineCode": {
+        "description": "Why one line was rejected before the batch was received (D1).",
+        "oneOf": [
+          {
+            "const": "not_an_object",
+            "description": "The line is not one JSON object.",
+            "type": "string"
+          },
+          {
+            "const": "shape_unknown",
+            "description": "The line names no `shape@version`, or one the source does not declare.",
+            "type": "string"
+          },
+          {
+            "const": "field_undeclared",
+            "description": "A field the shape does not declare.",
+            "type": "string"
+          },
+          {
+            "const": "field_missing",
+            "description": "A field the shape requires is missing.",
+            "type": "string"
+          },
+          {
+            "const": "field_wrong_kind",
+            "description": "A field's value is not of the declared kind.",
+            "type": "string"
+          },
+          {
+            "const": "field_too_long",
+            "description": "A field's string is longer than its cap.",
+            "type": "string"
+          },
+          {
+            "const": "line_too_long",
+            "description": "The line is longer than the line bound.",
+            "type": "string"
+          },
+          {
+            "const": "unknown",
+            "description": "A code this contract version does not know.",
+            "type": "string"
+          }
+        ]
+      },
+      "Manifest": {
+        "description": "A producer's announcement.",
+        "properties": {
+          "contract_version": {
+            "description": "The contract version it was built against (D1b).",
+            "type": "string"
+          },
+          "fingerprint": {
+            "description": "The machine fingerprint: an app-specific HMAC of the machine's stable\nidentifier. Only a hint for offering continuation, never an identity\n(D2).",
+            "type": "string"
+          },
+          "needs_vocabulary": {
+            "default": false,
+            "description": "Whether it needs the vocabulary of project and customer names (D7).",
+            "type": "boolean"
+          },
+          "producer": {
+            "description": "The producer's name, e.g. `wild-omarchy`.",
+            "maxLength": 48,
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "type": "string"
+          },
+          "references": {
+            "default": [],
+            "description": "Existing types of the tribe the producer's shapes reference. It never\nwrites into them (D4a).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDecl"
+            },
+            "type": "array"
+          },
+          "tribe": {
+            "description": "The tribe it proposes, if any. Absent, Wild proposes one (D16).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "description": "The producer's own version.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "producer",
+          "version",
+          "contract_version",
+          "sources",
+          "fingerprint"
+        ],
+        "title": "Manifest",
+        "type": "object"
+      },
+      "PairingFile": {
+        "description": "What a pairing file holds: the door, the pin of its certificate, and the\none-time code. JSON, one object, written owner-only (mode 0600).",
+        "properties": {
+          "door": {
+            "description": "The door's address: `https://host:port` on the local network or this\ncomputer, `http://host:port` for the kit's own door.",
+            "type": "string"
+          },
+          "door_certificate": {
+            "description": "The pin of the door's certificate, `sha256:` and 64 hex digits\n([`crate::door_certificate`]). Absent for an `http://` door.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pairing_code": {
+            "description": "The one-time code that opens the program's announcement: sent once, as\nthe `wild-pairing-code` header, and never shown or logged.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "door",
+          "pairing_code"
+        ],
+        "title": "PairingFile",
+        "type": "object"
+      },
+      "Refusal": {
+        "description": "A refused request: `4xx`/`5xx` with an ADR-0361 body. Wild keeps nothing\nof it.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/RefusalCode"
+          },
+          "error": {
+            "description": "A sentence for a human; never decided on.",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "default": {},
+            "type": "object"
+          },
+          "profile": {
+            "description": "The profile that answered, when the request got that far.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rejected_lines": {
+            "description": "For [`RefusalCode::BatchRefused`]: every rejected line.",
+            "items": {
+              "$ref": "#/components/schemas/RejectedLine"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "error",
+          "code"
+        ],
+        "title": "Refusal",
+        "type": "object"
+      },
+      "RefusalCode": {
+        "description": "Why the door refused a whole request. Wild keeps nothing of a refused\nrequest.",
+        "oneOf": [
+          {
+            "const": "batch_refused",
+            "description": "A line fails its declared shape. The reply lists the rejected lines;\nthe producer fixes them and re-sends.",
+            "type": "string"
+          },
+          {
+            "const": "over_bound",
+            "description": "A body, a line or a field is over its bound (HTTP 413).",
+            "type": "string"
+          },
+          {
+            "const": "shape_version_undeclared",
+            "description": "A line names a shape version the source does not declare, or one it\nhas retired.",
+            "type": "string"
+          },
+          {
+            "const": "contract_unsupported",
+            "description": "The manifest's contract version is not served. `params.supported`\nlists the versions that are.",
+            "type": "string"
+          },
+          {
+            "const": "daemon_rewound",
+            "description": "The producer presented a commit mark higher than the daemon's: the\ndaemon was restored from a backup. `params` is a\n[`crate::device::Rewound`]: what it still knows, and how many live\nlines of this device it still holds (D4a-R).",
+            "type": "string"
+          },
+          {
+            "const": "backpressure",
+            "description": "The device's received batches not yet processed are over its cap;\nkeep the batch and retry after `Retry-After` (HTTP 429).",
+            "type": "string"
+          },
+          {
+            "const": "unauthenticated",
+            "description": "The key does not verify, or opens no route of this request. Every\nfailure before a key verifies is this one code (HTTP 401).",
+            "type": "string"
+          },
+          {
+            "const": "unavailable",
+            "description": "Wild could not store the batch durably, so it received nothing. Keep\nthe batch and retry after `Retry-After` (HTTP 503).",
+            "type": "string"
+          },
+          {
+            "const": "paused",
+            "description": "The operator paused this device, or its whole producer. Nothing was\nreceived: keep the batch and retry after `Retry-After` (HTTP 503,\n[`PAUSED_RETRY_AFTER_SECS`]). The key still opens the door, so the\nstatus route answers, with the `paused` directive, and once the\noperator resumes it the same key delivers again: no new pairing, no\nnew key, no new epoch. A revoked key is `unauthenticated` instead.",
+            "type": "string"
+          },
+          {
+            "const": "no_such_route",
+            "description": "No route of the contract answers this method and path (HTTP 404; 405\nfor a route's path asked with another method). `params` holds the\n`method` and `path` asked. Nothing was received: fix the request, as\nsending it again unchanged reaches nothing.",
+            "type": "string"
+          },
+          {
+            "const": "unknown",
+            "description": "A code this contract version does not know.",
+            "type": "string"
+          }
+        ]
+      },
+      "RejectedLine": {
+        "description": "A line the door rejected before the batch was received (D1).",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/LineCode"
+          },
+          "line": {
+            "description": "The line's number in the body, counting from 1.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "params": {
+            "additionalProperties": true,
+            "default": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "line",
+          "code"
+        ],
+        "type": "object"
+      },
+      "Rewound": {
+        "description": "The parameters of a `daemon_rewound` refusal.",
+        "properties": {
+          "known_at": {
+            "description": "When the daemon last received a batch under that mark, RFC 3339.",
+            "type": "string"
+          },
+          "known_mark": {
+            "description": "The commit mark the daemon still knows.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "live_held": {
+            "description": "The live lines of this device that Wild still holds above\n`known_mark`: in receipts it kept, and in the lake. The producer\nreports as lost only the live events it counted above `known_mark`\nless these.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "known_mark",
+          "known_at",
+          "live_held"
+        ],
+        "title": "Rewound",
+        "type": "object"
+      },
+      "ShapeDecl": {
+        "description": "A declared shape: its version, its key class, its fields and the type its\nrecords are proposed to fill.",
+        "properties": {
+          "description": {
+            "description": "What one record of this shape is, in the operator's words (\"One\nfinished work session in OpenCode\"). Optional; at most 280 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FieldDecl"
+            },
+            "type": "array"
+          },
+          "key": {
+            "default": [],
+            "description": "The fields that form a `natural` key. Empty for a `position` or a\n`live` shape, which carry their key parts in reserved fields\n([`KeyClass::reserved_parts`]).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "key_class": {
+            "$ref": "#/components/schemas/KeyClass"
+          },
+          "name": {
+            "pattern": "^[a-z0-9_]+$",
+            "type": "string"
+          },
+          "target_type": {
+            "description": "The type the producer proposes this shape fills, usually a new one of\nits own. The operator accepts it or maps the shape into another type.",
+            "maxLength": 48,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "version": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "key_class",
+          "fields",
+          "target_type"
+        ],
+        "type": "object"
+      },
+      "ShapeRef": {
+        "description": "A shape's name and version, `name@version`.",
+        "pattern": "^[a-z0-9_]+@[0-9]+$",
+        "type": "string"
+      },
+      "SourceDecl": {
+        "description": "One source a producer feeds: a slug and the shapes it sends.",
+        "properties": {
+          "description": {
+            "description": "What the source is, in the operator's words (\"Usage of the OpenCode\nagent on this machine\"). Optional; at most 280 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shapes": {
+            "items": {
+              "$ref": "#/components/schemas/ShapeDecl"
+            },
+            "type": "array"
+          },
+          "slug": {
+            "maxLength": 48,
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "shapes"
+        ],
+        "type": "object"
+      },
+      "StatusReply": {
+        "description": "The status route's reply.",
+        "properties": {
+          "commit_mark": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "directives": {
+            "$ref": "#/components/schemas/Directives",
+            "default": {
+              "paused": false,
+              "vocabulary_changed": false
+            }
+          },
+          "profile": {
+            "type": "string"
+          },
+          "statuses": {
+            "items": {
+              "$ref": "#/components/schemas/BatchStatus"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "profile",
+          "commit_mark",
+          "statuses"
+        ],
+        "title": "StatusReply",
+        "type": "object"
+      },
+      "StatusRequest": {
+        "description": "The status route's request: the ids to report on.",
+        "properties": {
+          "ids": {
+            "items": {
+              "$ref": "#/components/schemas/BatchId"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "StatusRequest",
+        "type": "object"
+      },
+      "Vocabulary": {
+        "description": "The vocabulary an approved device receives, scoped to its person.",
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/VocabularyEntry"
+            },
+            "type": "array"
+          },
+          "etag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "etag",
+          "entries"
+        ],
+        "title": "Vocabulary",
+        "type": "object"
+      },
+      "VocabularyEntry": {
+        "description": "One entry of the vocabulary: a project's or a customer's key and name. A\ntitle match resolves to the key a reference field carries (D7).",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "target_type": {
+            "description": "The type the key belongs to, e.g. `Kunde`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "target_type"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "producerKey": {
+        "bearerFormat": "wdk_<keyid>_<secret>",
+        "description": "A producer key, minted when the operator activates the producer (D2).",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "The door a program outside the Wild daemon, a **producer**, sends closed records through.\n\n## Where the door is\n\nA producer on the operator's machine reaches the door over the socket `system/ingest.sock` in the operator's profile. Over TCP it takes a **pairing file**, which Wild writes when the operator pairs it (`PairingFile` among the schemas): one JSON object with the door's address (`door`), the fingerprint of its certificate (`door_certificate`, absent for an `http://` door) and the one-time pairing code (`pairing_code`). Wild writes it readable by the operator's user alone, so the code never passes through a prompt or a chat. Take the file's path as configuration, e.g. `--pairing <file>`, never its contents, and never print or log the code.\n\nRead the file at your first start. Keep the door and its fingerprint with your key, announce yourself with the code, and remove the file once your state holds the announcement: for as long as the code holds, it opens an announcement in your place. A later start, with the same command, finds no file and takes the door it kept.\n\n- `http://` on loopback, for this machine or a virtual machine on it: plain, no certificate, no fingerprint.\n- `https://` on the local network: TLS only, with a certificate the Wild made itself, which no certificate authority vouches for. **Pin it.** The fingerprint has the form `sha256:` followed by 64 lowercase hex digits: the SHA-256 of the certificate's DER bytes — the end-entity certificate the door shows first in its TLS handshake, not its key and not its PEM text. Trust exactly the certificate whose fingerprint that is: compare the SHA-256 of the certificate the door showed with the pin before you write a single byte over the connection, and send only when they are equal. Where your TLS library lets you, do the comparison inside the handshake, in a custom certificate verifier, so the handshake's signatures are checked against that certificate; where it does not (Python's `ssl`, Node's `tls`), complete the handshake without certificate-authority verification, take the peer's certificate in DER, compare, then send. Never trust the door any other way: not by a certificate authority, not by its name — the certificate's name is not the address you dial, so do not check it — and never send with the comparison skipped. A door that shows another certificate is not the Wild you were paired with, or its certificate changed: refuse, send nothing — not the pairing code, not a batch — and say so. Never retry it over `http://`: the door's port speaks only TLS, and a plain request carries the pairing code in the clear. An `https://` door given without a fingerprint is refused the same way.\n\n## The road\n\n1. **Announce.** `POST /producers/announcements` with your manifest: your sources, the shapes each sends, their fields, and what each of them means. Over the TCP listener the request carries the pairing file's code in the `wild-pairing-code` header; on the local socket it needs none.\n2. **Wait for the operator.** Poll `GET /producers/announcements/{announcement}`. It reads `pending` until the operator says yes. While Wild makes your sources ready it answers `503` with the reason in `params.reason`; poll again. Once ready, the answer hands over `producer_key` and `epoch` exactly once: keep both. Two states end the wait for good: `rejected` (the operator declined) and `revoked` (the operator cut this device off, before or after it fetched its key). On either, stop polling and stop sending; only a new announcement the operator lets in again pairs this install anew.\n3. **Send.** `POST /tribes/{tribe}/producers/{producer}/sources/{slug}/batches` with `Authorization: Bearer <producer_key>`, one NDJSON line per record: `{\"shape\": \"name@version\", \"record\": {…}}`. `{tribe}` is the `tribe` the poll answered with your key, the one the operator chose — never a name of your own; keep it with the key. `{producer}` and `{slug}` are your manifest's. `202 received` means Wild holds the batch durably. A batch sent again after a lost reply is recognised by its id and answered from the receipt. `503 paused` means the operator paused this device or its producer: nothing was received, so keep the batch and send it again after `Retry-After`. Your key still opens the door, and the status route's `paused` directive says when the pause ends; once the operator resumes you, the same key delivers again — no new pairing, no new key, no new epoch. A paused device is never `401`: that answer is a revoked key.\n4. **Ask for its state.** `POST /tribes/{tribe}/producers/{producer}/batches/status` with the batch ids. A batch moves from `received` to `processed` or `failed`; `conflicts` name the lines Wild did not take as sent. States are information: never re-send because of one. A batch Wild removed with its rows, because its source's retention ended or the operator erased it, reads `expired`: drop it if you still hold it. A re-send of it is answered `expired` and writes nothing. Follow the `directives`: `new_epoch`, `vocabulary_changed`, `paused`.\n\n## Where your records land\n\nEvery shape lands in a table of the tribe's domain model. When the operator activates you, a shape the model does not take yet gets a table of its own, named after the shape's `target_type`, each field onto the field of its own name. The operator may map a shape into another table instead, now or later. Your records never overwrite a field the operator maintains. Shapes that share a `target_type` share its table, so they declare a field of one name alike. An announcement whose activation would be refused, such as one where they do not, reaches the operator with the reason and no yes.\n\n## Describe what you send\n\nGive every source, shape and field a `description` in the operator's words: its meaning, its unit, an example. Wild carries a field's description onto the table's field, and the operator and Wild's assistant map and explain your data from it. `cost` says too little; \"Estimated cost of the session in US dollars, e.g. 0.42\" says enough.\n\n## Keys and history\n\nSend closed records only: a finished span, a settled measurement, never a running total you would rewrite later. The shape's `key_class` says what identifies a record:\n\n- `natural` — the shape's own key fields;\n- `position` — an append-only file's generation and byte offset, in `_generation` and `_offset`;\n- `live` — your install's epoch and a counter, in `_epoch` and `_seq`.\n\nWild prefixes every id with your device. A record sent again under its id with other values is refused (`source_rewrote_history`), and the first values stay. Send each record once: a record sent again unchanged in a later batch is taken, but stored again as a new version.\n\n## Versions\n\nA shape you change is a new version (`name@version`): the door takes only the versions the tribe binds. Additive only within a contract version: a client ignores fields it does not know, and treats any code or state it does not know as \"not received: keep the batch and back off\".\n\n## Prove it with the kit\n\n`wild-kit` serves this door on a sandbox profile that holds no operator data, and its yes to your announcement is automatic. `wild-kit run` runs your producer through the kit's scenarios and prints one line per check, `PASS` or `FAIL`, with what went wrong in words:\n\n```\nwild-kit run --dir /tmp/wild-kit-run -- ./my-producer --pairing {pairing} --data-dir {state}\n```\n\nThe kit fills the placeholders for each scenario: `{pairing}`, the path of a pairing file naming the door over loopback TCP, or `{socket}` (the door's socket), `{state}`, an empty directory of your producer's own for its key and outbox, and optionally `{source}`, an append-only file of text lines the kit writes for a producer that reads a `position` source, and `{keys}`, a directory for your key alone, if your producer keeps it apart from its state. The kit writes the pairing file as Wild does, owner-only, at that machine's first start and after it lost its key, each time with a fresh code; at every other start it is as your producer left it. A producer that announces itself again on a restart is refused, as the real door refuses it, and one that leaves the file behind once its announcement is made fails `received`: its code lies readable on disk. The file names a plain `http://` door and no fingerprint, except in the two scenarios of the door's certificate below. Each scenario starts your producer from nothing on a fresh sandbox, lets it run until it exits or stays quiet for `--patience` seconds (default 5), and starts it again on the same state, as a restart would; between starts the file scenarios write, truncate, copy and restore `{source}` and your state. Run it on fixed, synthetic input of several batches: the kit compares what your producer sends under each answer with what it sends on a clean run. The kit hands over the same epochs in every scenario, so a `live` record sends the same line each time.\n\nThe scenarios answer the first send of every batch:\n\n- `received`, the door's own answer: every record reads back once with its batch as its lineage, nothing answered `received` is sent again, and your batches sent again in reverse order write nothing;\n- `unknown`, a state this contract version does not know, `413`, `422 batch_refused`, `422 shape_version_undeclared`, `429` and `503` with `Retry-After`, `503 paused` (the operator paused the device) with `Retry-After`, and a refusal code it does not know: every line comes back, no sooner than `Retry-After`, and is received;\n- a reply lost after the door received the batch: the same batch comes back and is answered from its receipt;\n- `processed` with every conflict code, `failed`, and `expired`: nothing comes back, and your producer sends the same lines as on a clean run;\n- a reply lost after the flow had `processed` or `failed` the batch: the same batch comes back, is answered from its receipt in that state, and writes nothing;\n- `received` with a directive: `paused` for 2 s (no batch goes out until a reply, the status route's included, stops saying it), `rotate_key` (every later request presents the new key), `send_interval_secs: 1` (batches go out at least a second apart), `new_epoch` (every `live` record made afterwards carries it) and `vocabulary_changed` (your producer fetches the vocabulary again). Apart from that, your producer sends the same lines as on a clean run;\n- your producer killed while a batch is on the way, once before the door saw it and once after it received it: the door receives the same lines as on a clean run, none lost and none doubled.\n\nWith `{source}`, the kit also counts the `position` rows (records carrying `_generation` and `_offset`) against the complete lines it wrote:\n\n- a truncation in place: the lines written after it come under a new generation, and none is lost;\n- a half-written last line: nothing is sent before its newline, and the whole line arrives once;\n- a whole-machine restore (`{state}` and `{source}` back from a copy) and a rollback of `{source}` alone: nothing is lost or doubled, your producer re-sends nothing it had sent, and a restored copy takes the `new_epoch` the door hands over after its `live` record collides.\n\nYour producer's identity, and a rewound Wild:\n\n- re-pairing: `{state}` and `{keys}` are emptied, as a reinstall does, and your producer pairs again. It reports the fingerprint it first paired with, the door's question offers to continue its device, and the kit answers „Als denselben Rechner fortsetzen\"; what it reads again lands on the ids it had, so nothing is written twice;\n- a cloned machine: a second copy of your producer starts on a state of its own while the first holds a live key. The question proposes „neuer Rechner\"; the kit gives the other answer, which revokes the first key. Answered `401`, the first copy asks its announcement, reads `revoked`, and sends nothing more;\n- a lost state with a kept key (only with `{keys}`): `{state}` is emptied, and your producer asks `POST …/device/epoch` before its first `live` record and takes that epoch; nothing is written twice;\n- a Wild restored from a backup (only with `{source}`): the sandbox comes back from a copy taken one batch earlier. Your producer's next batch presents its `wild-commit-mark` and is answered `daemon_rewound`; it sends again what Wild received above `known_mark`, and every record it lost reads back once;\n- a Wild restored from a backup that holds only part of your device's receipts (only with `{source}`): the receipt of one batch in the middle is gone and those above it stay. Your producer's next batch is answered `daemon_rewound` with `known_mark` just below the gap and `live_held`, the `live` records Wild still holds above it; it sends again only what was received above `known_mark`, nothing at or below it, and every record it lost reads back once;\n- a receipt that expired with its rows (only with `{source}`): the kit expires the first batch the door received, as a retention or an erasure does, and sends it to the door again, which answers `expired` and writes nothing. Your producer is not told `daemon_rewound`, since the door still knows the mark, and sends nothing of that batch again;\n- a producer whose shape is `natural` that loses its state and keeps its key (only with `{keys}`): it reads its source again from the start, and the door answers no `source_rewrote_history` for a record that did not change; nothing is written twice.\n\nThe whole-machine restore runs for every producer; without `{source}` it restores `{state}` and `{keys}` alone. Its row count, the truncation, the half-written line and the rollback need `{source}`: a producer that declares a `position` shape but names none gets them as `NOT MEASURED`, and only one that declares no `position` shape gets them as `SKIP`. A producer that declares a `live` shape and sends no `live` record after the restore, after a `new_epoch` directive or after a lost state gets that `new_epoch` check as `NOT MEASURED`; one that declares no `live` shape has no epoch to take anew and gets the three as `SKIP`. Only a producer that declares a `natural` shape is read again from the start; one that declares none gets that scenario as `SKIP`. Without `{source}`, the cloned machine's first copy has nothing new to send, and the restored Wild cannot be given one batch more, nor an expiry anything to send after it: those checks are `NOT MEASURED`. Without `{keys}`, a lost state is a lost key too, which re-pairing covers: the kept-key scenario is `SKIP`.\n\nThe door's certificate (only with `{pairing}`): the pairing file names an `https://` door on loopback, serving a self-signed certificate the kit makes for that scenario alone:\n\n- pinned: the file's `door_certificate` names the door's certificate; your producer pairs over it and its batches are received;\n- a wrong pin: the door shows another certificate than the file names; your producer sends nothing over it: not a byte past the handshake, and no connection to the door's port that does not open with a TLS handshake — a plain-HTTP retry fails.\n\nA producer that reaches the door over `{socket}` alone gets both as `SKIP`, since the socket has no certificate.\n\nWhat the kit does not play it prints as `NOT BUILT`, which is the kit's gap, not your producer's; every scenario above is played. It exits 0 only when every check passed or was skipped. Each scenario's sandbox and your producer's output stay under `--dir`; `wild-kit rows --dir <dir>/<scenario>/sandbox` prints the rows it wrote.\n",
+    "license": {
+      "identifier": "Apache-2.0",
+      "name": "Apache-2.0"
+    },
+    "title": "Wild producer ingest contract",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/producers/announcements": {
+      "post": {
+        "operationId": "announce",
+        "parameters": [
+          {
+            "description": "The one-device pairing code the operator made on the daemon's machine, as the pairing file's `pairing_code` carries it. It opens exactly one announcement, once, until it expires; without it, or with a used or expired code, the announcement is answered 401 `unauthenticated`.",
+            "in": "header",
+            "name": "wild-pairing-code",
+            "required": false,
+            "schema": {
+              "pattern": "^wdp_[0-9a-f]+_[0-9a-f]+$",
+              "type": "string"
+            },
+            "x-wild-over-tcp": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Manifest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementReceipt"
+                }
+              }
+            },
+            "description": "The announcement is waiting for the operator."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "The credential does not verify: the producer key, or before a key the pairing code over TCP. Every failure before a credential verifies is this one answer."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "The manifest is inconsistent, or names a contract version this daemon does not serve (`contract_unsupported`)."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Backpressure. Retry after `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Wild could not store the request durably (`unavailable`), or the operator paused this device or its producer (`paused`: the key still opens the door, and the same key delivers again once resumed). Nothing was received; retry after `Retry-After`."
+          }
+        },
+        "security": [],
+        "summary": "A producer announces itself with its manifest. It shows dashed in the atlas until the operator activates it (D16).",
+        "x-wild-reach": "Before a producer key: over the profile's ingest.sock (mode 0600, the operator's own user), or over the TCP listener, with the headers marked `x-wild-over-tcp`."
+      }
+    },
+    "/api/v1/producers/announcements/{announcement}": {
+      "get": {
+        "operationId": "announcement_status",
+        "parameters": [
+          {
+            "description": "The `announcement` the announce answered.",
+            "in": "path",
+            "name": "announcement",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementStatus"
+                }
+              }
+            },
+            "description": "The announcement's state."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "The credential does not verify: the producer key, or before a key the pairing code over TCP. Every failure before a credential verifies is this one answer."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "No such announcement on this profile."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Backpressure. Retry after `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Wild could not store the request durably (`unavailable`), or the operator paused this device or its producer (`paused`: the key still opens the door, and the same key delivers again once resumed). Nothing was received; retry after `Retry-After`."
+          }
+        },
+        "security": [],
+        "summary": "Poll an announcement. Once activated, the reply carries the key and first epoch exactly once; every later poll returns status only (D2).",
+        "x-wild-reach": "Before a producer key: over the profile's ingest.sock (mode 0600, the operator's own user), or over the TCP listener as is."
+      }
+    },
+    "/api/v1/tribes/{tribe}/producers/{producer}/batches/status": {
+      "post": {
+        "operationId": "batch_status",
+        "parameters": [
+          {
+            "description": "The tribe the operator placed the producer in when saying yes: the `tribe` the announcement's poll answers with the key. A key opens its own tribe's routes alone; another tribe here is answered `401`.",
+            "in": "path",
+            "name": "tribe",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `producer` the manifest names.",
+            "in": "path",
+            "name": "producer",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusReply"
+                }
+              }
+            },
+            "description": "Each id's state; `unknown` means re-send it."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "The credential does not verify: the producer key, or before a key the pairing code over TCP. Every failure before a credential verifies is this one answer."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Backpressure. Retry after `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Wild could not store the request durably (`unavailable`), or the operator paused this device or its producer (`paused`: the key still opens the door, and the same key delivers again once resumed). Nothing was received; retry after `Retry-After`."
+          }
+        },
+        "security": [
+          {
+            "producerKey": []
+          }
+        ],
+        "summary": "Ask for the states of batches by id (D3): received, processed or failed. Informational; only `unknown` asks for a re-send."
+      }
+    },
+    "/api/v1/tribes/{tribe}/producers/{producer}/device/epoch": {
+      "post": {
+        "operationId": "new_epoch",
+        "parameters": [
+          {
+            "description": "The tribe the operator placed the producer in when saying yes: the `tribe` the announcement's poll answers with the key. A key opens its own tribe's routes alone; another tribe here is answered `401`.",
+            "in": "path",
+            "name": "tribe",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `producer` the manifest names.",
+            "in": "path",
+            "name": "producer",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Epoch"
+                }
+              }
+            },
+            "description": "The new epoch."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "The credential does not verify: the producer key, or before a key the pairing code over TCP. Every failure before a credential verifies is this one answer."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Backpressure. Retry after `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Wild could not store the request durably (`unavailable`), or the operator paused this device or its producer (`paused`: the key still opens the door, and the same key delivers again once resumed). Nothing was received; retry after `Retry-After`."
+          }
+        },
+        "security": [
+          {
+            "producerKey": []
+          }
+        ],
+        "summary": "Take a new random epoch for `live` records: after a fresh install. After a collision Wild assigns one itself and hands it over in the `new_epoch` directive (D4)."
+      }
+    },
+    "/api/v1/tribes/{tribe}/producers/{producer}/sources/{slug}/batches": {
+      "post": {
+        "operationId": "send_batch",
+        "parameters": [
+          {
+            "description": "The tribe the operator placed the producer in when saying yes: the `tribe` the announcement's poll answers with the key. A key opens its own tribe's routes alone; another tribe here is answered `401`.",
+            "in": "path",
+            "name": "tribe",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `producer` the manifest names.",
+            "in": "path",
+            "name": "producer",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The source's `slug`, as the manifest names it.",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The highest commit mark this producer has stored; absent means 0. A higher one than the daemon knows is answered `daemon_rewound` before anything is received (D4a-R).",
+            "in": "header",
+            "name": "wild-commit-mark",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`gzip` when the body is compressed. The decoded body is held to the batch bounds, and its ratio to the compressed body to `x-wild-bounds.max_compression_ratio`.",
+            "in": "header",
+            "name": "content-encoding",
+            "required": false,
+            "schema": {
+              "enum": [
+                "gzip"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-ndjson": {
+              "schema": {
+                "type": "string"
+              },
+              "x-line-schema": {
+                "$ref": "#/components/schemas/Line"
+              }
+            }
+          },
+          "description": "One `Line` per line, at most 10000 lines and 6291456 decoded bytes, each line at most 65536 bytes. The batch's id is the SHA-256 of the decoded body.",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchReply"
+                }
+              }
+            },
+            "description": "Received. Drop the batch from the outbox; its later states are for information only."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "The credential does not verify: the producer key, or before a key the pairing code over TCP. Every failure before a credential verifies is this one answer."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "The daemon was restored from a backup (`daemon_rewound`). Nothing is received; recover from `known_mark`."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "A body, line or field is over its bound (`over_bound`). Nothing is received."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "A line fails its shape (`batch_refused`), or names an undeclared version (`shape_version_undeclared`). Nothing is received."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Backpressure. Retry after `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Wild could not store the request durably (`unavailable`), or the operator paused this device or its producer (`paused`: the key still opens the door, and the same key delivers again once resumed). Nothing was received; retry after `Retry-After`."
+          }
+        },
+        "security": [
+          {
+            "producerKey": []
+          }
+        ],
+        "summary": "Send one batch. The request carries the highest commit mark the producer has stored (`wild-commit-mark`). `202` means received: Wild holds the batch durably and runs it through the source's intake flow."
+      }
+    },
+    "/api/v1/tribes/{tribe}/producers/{producer}/vocabulary": {
+      "get": {
+        "operationId": "vocabulary",
+        "parameters": [
+          {
+            "description": "The tribe the operator placed the producer in when saying yes: the `tribe` the announcement's poll answers with the key. A key opens its own tribe's routes alone; another tribe here is answered `401`.",
+            "in": "path",
+            "name": "tribe",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `producer` the manifest names.",
+            "in": "path",
+            "name": "producer",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `etag` of the vocabulary the client holds. When it is still current the answer is 304 with no body.",
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vocabulary"
+                }
+              }
+            },
+            "description": "The vocabulary, scoped to the device's person."
+          },
+          "304": {
+            "description": "Unchanged since the ETag given."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "The credential does not verify: the producer key, or before a key the pairing code over TCP. Every failure before a credential verifies is this one answer."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Backpressure. Retry after `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Wild could not store the request durably (`unavailable`), or the operator paused this device or its producer (`paused`: the key still opens the door, and the same key delivers again once resumed). Nothing was received; retry after `Retry-After`."
+          }
+        },
+        "security": [
+          {
+            "producerKey": []
+          }
+        ],
+        "summary": "The project and customer names an approved device matches window titles against, locally (D7). Supports `If-None-Match`."
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "V1: the socket `system/ingest.sock` under the operator's profile, and the daemon's TCP ingest listener when the operator opens one: TLS on loopback and on the local network alike, so a connector takes one road wherever it runs (only an engineer's `WILD_INGEST_BIND` on loopback serves plain). Over TLS the door's certificate is its own, self-signed: the producer pins it by the fingerprint its pairing file carries, `sha256:` and 64 lowercase hex digits of the SHA-256 of the certificate's DER, compares it with the certificate the door shows before it writes a byte, and trusts no CA or name in its place and never sends with the comparison skipped.",
+      "url": "/api/v1"
+    }
+  ],
+  "x-wild-bounds": {
+    "description": "What one batch may carry. Over a bound the batch is answered 413 `over_bound` and nothing is received. A text field is held to its declared `max_len`.",
+    "max_compression_ratio": 20,
+    "max_decoded_bytes": 6291456,
+    "max_line_bytes": 65536,
+    "max_lines": 10000
+  }
+}

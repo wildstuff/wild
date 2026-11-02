@@ -1,0 +1,9 @@
+vehicle_id,make,model_name,first_registration,mileage_km,price_eur,fuel,gearbox,color,status,listed_on
+mob-401882731,BMW,320d Touring,2021-03,45000,28900.00,diesel,automatic,black,available,2026-06-02
+mob-401882745,VW,Golf VIII 1.5 TSI,2020-11,58200,19450.00,petrol,manual,grey,available,2026-06-11
+mob-401882803,Skoda,Octavia Combi 2.0 TDI,2019-05,98400,15990.00,diesel,automatic,white,available,2026-06-20
+mob-401882860,Audi,A4 Avant 40 TFSI,2022-01,31200,33700.00,petrol,automatic,blue,reserved,2026-07-01
+mob-401882911,Toyota,Corolla 1.8 Hybrid,2021-09,41800,21900.00,hybrid,automatic,red,available,2026-07-08
+mob-401882957,Ford,Focus Turnier 1.0 EcoBoost,2018-06,112300,10450.00,petrol,manual,silver,available,2026-07-15
+mob-401883004,Hyundai,Kona Elektro 64kWh,2022-05,28700,26400.00,electric,automatic,green,available,2026-07-22
+mob-401883049,Mercedes-Benz,C 220 d T-Modell,2020-02,76900,27800.00,diesel,automatic,black,sold,2026-05-18

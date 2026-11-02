@@ -1,0 +1,129 @@
+// WILD Rerank-Adapter Interface
+//
+// The Tier-2 component contract for (query, documents) → relevance-scores
+// cross-encoder reranking. Sister contract to `wild:embed-adapter`: modality-
+// precise by design — operators install one OCI image per modality, not
+// "one AI image". Implemented by a local `llama-server --rerank` endpoint
+// (ADR-0145) or any Jina-style `/v1/rerank` cloud provider.
+//
+// Mirrors `wild:embed-adapter`'s `interface embed` 1:1 in shape (two-bucket
+// `rerank-error`, `adapter-info` + `info()`, the `*-plugin` / `*-host`
+// world split). Rerank is a strict additive sibling of embed, exactly as
+// embed is of chat.
+
+package wild:rerank-adapter@0.1.0;
+
+interface rerank {
+
+    /// Token usage when the provider reports it. Mirror of
+    /// `wild:ai@0.4.0::token-usage` / `wild:embed-adapter::token-usage`.
+    /// Local adapters (llama.cpp) report zeros.
+    record token-usage {
+        input-tokens: u32,
+        output-tokens: u32,
+        cache-read-input-tokens: u32,
+        cache-creation-input-tokens: u32,
+    }
+
+    /// A rerank request — the retrieve stage's top-K candidates, scored
+    /// jointly against the query. `rerank-response.results` carries an
+    /// `index` back into `documents`; callers sort by `relevance-score`
+    /// descending.
+    ///
+    /// NOTE — no `caller-context` here, exactly as `wild:embed-adapter`'s
+    /// `embed-request` omits it: the Tier-2 component never sees tribe
+    /// identity. The host shim owns tenant scoping + lock refresh from
+    /// the `wild:ai/rerank` caller-context, separately from the bytes the
+    /// adapter sends upstream.
+    record rerank-request {
+        /// The original retrieval query.
+        query: string,
+        /// Candidate texts from the retrieve stage, in order.
+        documents: list<string>,
+        /// Provider model id (e.g. `bge-reranker-v2-m3`).
+        model: string,
+        /// Keep only the best N; `None` = score all candidates.
+        top-n: option<u32>,
+    }
+
+    /// One scored candidate. `index` is into `rerank-request.documents`;
+    /// callers sort by `relevance-score` descending within one response.
+    /// Scores are provider-relative (llama.cpp logit, Cohere/Jina 0–1)
+    /// and MUST NOT be thresholded across models.
+    record rerank-result {
+        index: u32,
+        relevance-score: f32,
+    }
+
+    /// Rerank response. `results` is sorted by the adapter; callers may
+    /// re-sort by `relevance-score` descending if they need a stable
+    /// order across providers.
+    record rerank-response {
+        results: list<rerank-result>,
+        model: string,
+        usage: token-usage,
+    }
+
+    /// Two-bucket error — the same retryable/permanent split as
+    /// `wild:embed-adapter`'s `embed-error`. Connection-refused / 5xx /
+    /// rate-limit → retryable; bad model / malformed input / 4xx →
+    /// permanent.
+    variant rerank-error {
+        retryable(string),
+        permanent(string),
+    }
+
+    /// Adapter capability profile — mirror of `wild:embed-adapter`'s
+    /// `adapter-info`, trimmed to the rerank-relevant fields. Pure
+    /// static call; the host shim caches it at registration.
+    /// Additive within 0.1.0: new fields default conservative
+    /// (false / 0 / empty).
+    record adapter-info {
+        /// Adapter slug — matches the wasm-component package name.
+        /// Telemetry tag.
+        name: string,
+        /// Adapter-component semver.
+        version: string,
+        /// Upstream provider family: "local" | "jina" | "cohere" | "voyage" | "other".
+        /// Free-form (not enum) so a new provider needs no WIT change.
+        provider-family: string,
+        /// Max documents accepted in one rerank call. 0 = unknown / unbounded.
+        max-documents: u32,
+        /// Max query length in characters. 0 = unknown / unbounded.
+        max-query-chars: u32,
+    }
+
+    /// Return the adapter's capability profile. Pure static call —
+    /// adapters MUST return the same value every time within a process.
+    info: func() -> adapter-info;
+
+    /// The single rerank call. Synchronous; no streaming sibling.
+    rerank: func(request: rerank-request) -> result<rerank-response, rerank-error>;
+}
+
+/// World every Tier-2 rerank-adapter component implements. Inherits
+/// `wild:plugin-meta/plugin-base@0.3.0` (the meta lifecycle the
+/// `ComponentBackedHostPlugin` shim drives) and adds the typical
+/// Tier-2 imports + the rerank export:
+///   - `wild:secrets/store` — read the api-key alias (None for local
+///     llama.cpp, which needs no key).
+///   - `wild:http/outbound` — the GOVERNED HTTP call (ADR-0090): the
+///     host owns the socket, enforces the default-deny `egress.yaml`
+///     (a local endpoint needs an `allow_private` destination), injects
+///     credentials by reference, and audits every call.
+world rerank-adapter-plugin {
+    include wild:plugin-meta/plugin-base@0.3.0;
+    import wild:secrets/store@0.1.0;
+    import wild:http/outbound@0.1.0;
+    export rerank;
+}
+
+/// Host-side bindgen target. The `RerankAdapterShim` in
+/// `wild-host/src/shims/rerank_adapter_shim.rs` generates against this world
+/// to call into a guest's exported `rerank` interface without dragging
+/// in the guest-side imports (those are wired by the shim's
+/// `LinkerSeed` separately). Mirror of `wild:embed-adapter`'s
+/// `embed-adapter-host`.
+world rerank-adapter-host {
+    export rerank;
+}

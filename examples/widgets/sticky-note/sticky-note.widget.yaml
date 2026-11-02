@@ -1,0 +1,28 @@
+# Widget-catalog manifest sidecar. Copied NEXT TO the built `.wasm` into
+# `<profile_root>/system/widgets/` so the catalog (`GET /api/v1/widgets`),
+# `widget_search`, and the app-spec compiler see the `sticky-note` kind —
+# the catalog reads manifests only; the `.wasm` is loaded where a widget
+# actually renders.
+kind: sticky-note
+label: Sticky Note
+version: 0.1.0
+description: |
+  Teaching sample Tier-2 UI widget (ADR-0173). Renders a note card — a
+  title and a body text from the view's `config`, with an optional accent
+  `color` on the card edge. Config-only: it reads no bound data (a `bind`
+  on the view is ignored).
+config_schema: |
+  {"type":"object","properties":{"title":{"type":"string"},"text":{"type":"string"},"color":{"type":"string"}},"additionalProperties":false}
+capabilities: []
+data_shapes: []
+example_intents:
+  - sticky note
+  - note card
+  - pin a note
+  - reminder card
+example_spec: '{"type":"custom","widget_kind":"sticky-note","config":{"title":"Reminder","text":"Call the tax office on Monday.","color":"#f59e0b"}}'
+thumbnail: null
+accessibility_self_cert: |
+  A static text card: one heading and one paragraph, no interactive
+  elements. The accent colour marks the card edge only and never carries
+  text, so contrast does not depend on it.

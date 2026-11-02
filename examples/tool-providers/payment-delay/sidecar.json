@@ -1,0 +1,23 @@
+{
+  "slug": "payment-delay",
+  "version": "0.1.0",
+  "source": {
+    "type": "local",
+    "path": "payment-delay-0.1.0.wasm"
+  },
+  "wasm_filename": "payment-delay-0.1.0.wasm",
+  "trust": {
+    "tier": "community"
+  },
+  "provides": [
+    "wild:tool-provider/tools@0.4.0",
+    "wild:function/backing@0.1.0"
+  ],
+  "requires": [],
+  "capability_bundles": [
+    "function.payment-delay"
+  ],
+  "config_keys": [],
+  "secret_aliases": [],
+  "default_pool_size": 2
+}

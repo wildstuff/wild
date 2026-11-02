@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The parameters of a `daemon_rewound` refusal.",
+  "properties": {
+    "known_at": {
+      "description": "When the daemon last received a batch under that mark, RFC 3339.",
+      "type": "string"
+    },
+    "known_mark": {
+      "description": "The commit mark the daemon still knows.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "live_held": {
+      "description": "The live lines of this device that Wild still holds above\n`known_mark`: in receipts it kept, and in the lake. The producer\nreports as lost only the live events it counted above `known_mark`\nless these.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "known_mark",
+    "known_at",
+    "live_held"
+  ],
+  "title": "Rewound",
+  "type": "object"
+}

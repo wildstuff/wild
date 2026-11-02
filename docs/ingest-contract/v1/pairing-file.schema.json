@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What a pairing file holds: the door, the pin of its certificate, and the\none-time code. JSON, one object, written owner-only (mode 0600).",
+  "properties": {
+    "door": {
+      "description": "The door's address: `https://host:port` on the local network or this\ncomputer, `http://host:port` for the kit's own door.",
+      "type": "string"
+    },
+    "door_certificate": {
+      "description": "The pin of the door's certificate, `sha256:` and 64 hex digits\n([`crate::door_certificate`]). Absent for an `http://` door.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pairing_code": {
+      "description": "The one-time code that opens the program's announcement: sent once, as\nthe `wild-pairing-code` header, and never shown or logged.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "door",
+    "pairing_code"
+  ],
+  "title": "PairingFile",
+  "type": "object"
+}

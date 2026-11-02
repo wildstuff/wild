@@ -1,0 +1,24 @@
+# Intake mapping for the OUTBOUND invoice feed (sales invoices we issued).
+# Shipped WITH the template so `wild tribe apply` registers it as an
+# `intake_config` record — keyed by the fingerprint of `columns` — and the
+# intake-runner ingests `sample-data/invoices-outbound.csv` with zero chief.
+#
+# Two non-1:1 facts this mapping carries:
+#   * `customer_id` (the feed's column) renames to the type's `partner_id`.
+#   * `direction` is a per-FILE constant (`outbound`) — it is NOT a column;
+#     it is fixed by which feed this is. A constant mapping omits `column`.
+target_type: invoice
+key: [invoice_id]
+# The exact CSV header → drives the shape fingerprint the runner matches on.
+columns: [invoice_id, issued_date, due_date, paid_date, amount, currency, customer_id, status, payment_terms_days]
+mapping:
+  - { column: invoice_id, field: invoice_id, ty: text }
+  - { column: issued_date, field: issued_date, ty: date }
+  - { column: due_date, field: due_date, ty: date }
+  - { column: paid_date, field: paid_date, ty: date }
+  - { column: amount, field: amount, ty: decimal }
+  - { column: currency, field: currency, ty: text }
+  - { column: customer_id, field: partner_id, ty: text }   # rename
+  - { column: status, field: status, ty: text }
+  - { column: payment_terms_days, field: payment_terms_days, ty: int }
+  - { field: direction, value: outbound, ty: text }          # per-file constant

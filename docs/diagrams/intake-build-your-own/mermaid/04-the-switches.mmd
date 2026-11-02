@@ -1,0 +1,8 @@
+flowchart TD
+    Src["a source to onboard"] --> W1{"Switch 1<br/>the Chief picks a tool"}
+    W1 -->|"a document (blob)"| Ext["intake_document → extract-worker<br/>Extract · Resolve · Confirm · Govern"]
+    W1 -->|"a tabular source (source_ref)"| Run["intake_source → intake-runner"]
+    Run --> W2{"Switch 2<br/>fingerprint in registry?"}
+    W2 -->|"known shape"| Map["reuse the ShapeConfig<br/>map rows · ingest"]
+    W2 -->|"new shape"| Park["park · escalate to Chief"]
+    Park -. "Chief registers it once" .-> W2

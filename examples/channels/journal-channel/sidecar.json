@@ -1,0 +1,22 @@
+{
+  "slug": "journal-channel",
+  "version": "0.1.0",
+  "source": {
+    "type": "local",
+    "path": "journal-channel-0.1.0.wasm"
+  },
+  "wasm_filename": "journal-channel-0.1.0.wasm",
+  "trust": {
+    "tier": "community"
+  },
+  "provides": [
+    "wild:operator-channel/channel@0.1.0"
+  ],
+  "requires": [
+    "wild:messaging/consumer@0.3.0"
+  ],
+  "capability_bundles": [],
+  "config_keys": [],
+  "secret_aliases": [],
+  "default_pool_size": 1
+}

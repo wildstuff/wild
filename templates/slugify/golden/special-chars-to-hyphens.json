@@ -1,0 +1,10 @@
+{
+  "tool": "slugify",
+  "input": {
+    "text": "foo@bar!baz.qux"
+  },
+  "expected": {
+    "slug": "foo-bar-baz-qux"
+  },
+  "match": "exact"
+}

@@ -1,0 +1,7 @@
+# Intake mapping for the credit-facilities seed.
+# 1:1 with the `credit_facility` type (the derived headroom/utilisation fields
+# are NOT columns — the fold materialises them). Auto-intake; origin: authored
+# → Upsert. `facility_id` is the explicit natural key (the contrast to autokey).
+target_type: credit_facility
+key: [facility_id]
+columns: [facility_id, bank, account_iban, limit, drawn, review_date]

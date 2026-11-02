@@ -1,0 +1,261 @@
+{
+  "$defs": {
+    "FieldDecl": {
+      "description": "One field of a shape.",
+      "oneOf": [
+        {
+          "description": "Text, at most `max_len` characters.",
+          "properties": {
+            "kind": {
+              "const": "text",
+              "type": "string"
+            },
+            "max_len": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "max_len"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A number.",
+          "properties": {
+            "kind": {
+              "const": "number",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "`true` or `false`.",
+          "properties": {
+            "kind": {
+              "const": "bool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "An RFC 3339 timestamp, the record's own event time.",
+          "properties": {
+            "kind": {
+              "const": "timestamp",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The key of a record of another type. A reference keeps the target\ntype's own key; it is never prefixed with a device.",
+          "properties": {
+            "kind": {
+              "const": "reference",
+              "type": "string"
+            },
+            "target_type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "target_type"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "description": {
+          "description": "What the field holds, in the operator's words: its meaning, its unit,\nan example (\"Estimated cost of the session in US dollars, e.g. 0.42\").\nWild carries it onto the table's field. Optional; at most 280\ncharacters.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "KeyClass": {
+      "description": "How a shape's records get their ids.",
+      "oneOf": [
+        {
+          "const": "natural",
+          "description": "The id is the shape's declared key fields: a re-read writes nothing\nnew, and a record changed under its id is refused\n(`source_rewrote_history`).",
+          "type": "string"
+        },
+        {
+          "const": "position",
+          "description": "The id is an append-only file's generation and byte offset, in the\nreserved fields `_generation` (text) and `_offset` (a whole number); a\nrestored file's line is re-keyed by Wild (`generation_reassigned`).",
+          "type": "string"
+        },
+        {
+          "const": "live",
+          "description": "The id is a per-install epoch and counter, in the reserved fields\n`_epoch` and `_seq` (a whole number), for events seen only in the\nmoment; never backfilled.",
+          "type": "string"
+        }
+      ]
+    },
+    "ShapeDecl": {
+      "description": "A declared shape: its version, its key class, its fields and the type its\nrecords are proposed to fill.",
+      "properties": {
+        "description": {
+          "description": "What one record of this shape is, in the operator's words (\"One\nfinished work session in OpenCode\"). Optional; at most 280 characters.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/FieldDecl"
+          },
+          "type": "array"
+        },
+        "key": {
+          "default": [],
+          "description": "The fields that form a `natural` key. Empty for a `position` or a\n`live` shape, which carry their key parts in reserved fields\n([`KeyClass::reserved_parts`]).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "key_class": {
+          "$ref": "#/$defs/KeyClass"
+        },
+        "name": {
+          "pattern": "^[a-z0-9_]+$",
+          "type": "string"
+        },
+        "target_type": {
+          "description": "The type the producer proposes this shape fills, usually a new one of\nits own. The operator accepts it or maps the shape into another type.",
+          "maxLength": 48,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "type": "string"
+        },
+        "version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "key_class",
+        "fields",
+        "target_type"
+      ],
+      "type": "object"
+    },
+    "SourceDecl": {
+      "description": "One source a producer feeds: a slug and the shapes it sends.",
+      "properties": {
+        "description": {
+          "description": "What the source is, in the operator's words (\"Usage of the OpenCode\nagent on this machine\"). Optional; at most 280 characters.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "shapes": {
+          "items": {
+            "$ref": "#/$defs/ShapeDecl"
+          },
+          "type": "array"
+        },
+        "slug": {
+          "maxLength": 48,
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slug",
+        "shapes"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A producer's announcement.",
+  "properties": {
+    "contract_version": {
+      "description": "The contract version it was built against (D1b).",
+      "type": "string"
+    },
+    "fingerprint": {
+      "description": "The machine fingerprint: an app-specific HMAC of the machine's stable\nidentifier. Only a hint for offering continuation, never an identity\n(D2).",
+      "type": "string"
+    },
+    "needs_vocabulary": {
+      "default": false,
+      "description": "Whether it needs the vocabulary of project and customer names (D7).",
+      "type": "boolean"
+    },
+    "producer": {
+      "description": "The producer's name, e.g. `wild-omarchy`.",
+      "maxLength": 48,
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "type": "string"
+    },
+    "references": {
+      "default": [],
+      "description": "Existing types of the tribe the producer's shapes reference. It never\nwrites into them (D4a).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/SourceDecl"
+      },
+      "type": "array"
+    },
+    "tribe": {
+      "description": "The tribe it proposes, if any. Absent, Wild proposes one (D16).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "version": {
+      "description": "The producer's own version.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "producer",
+    "version",
+    "contract_version",
+    "sources",
+    "fingerprint"
+  ],
+  "title": "Manifest",
+  "type": "object"
+}

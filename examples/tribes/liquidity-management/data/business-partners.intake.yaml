@@ -1,0 +1,6 @@
+# Intake mapping for the business-partners feed.
+# 1:1 with the `business_partner` type (the CSV is a subset of its fields), so
+# auto-intake — only `{target_type, columns, key}` is shipped.
+target_type: business_partner
+key: [partner_id]
+columns: [partner_id, name, role, iban, payment_terms_days, cash_discount_percent, cash_discount_days, city, notes, telegram_chat_id]

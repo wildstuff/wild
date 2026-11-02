@@ -1,0 +1,5 @@
+# Auto-intake: columns map 1:1 onto `workout_log`. `exercise_id` must resolve a
+# real `exercise` (the ENFORCED `performs` edge); exercises load first.
+target_type: workout_log
+key: [log_id]
+columns: [log_id, date, exercise_id, duration_min, kcal_burned, intensity, notes]

@@ -1,0 +1,8 @@
+target/
+*.bak
+.DS_Store
+*.swp
+.idea/
+.vscode/
+wkg.lock
+src/bindings.rs

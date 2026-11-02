@@ -1,0 +1,6 @@
+package wildstuff:slugify@0.1.0;
+
+world slugify {
+    include wild:plugin-meta/plugin-base@0.3.0;
+    export wild:tool-provider/tools@0.4.0;
+}

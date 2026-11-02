@@ -1,0 +1,110 @@
+{
+  "$defs": {
+    "BatchId": {
+      "description": "A batch's id: the lowercase hex SHA-256 of its decoded body.",
+      "type": "string"
+    },
+    "BatchState": {
+      "description": "Where a batch stands.",
+      "oneOf": [
+        {
+          "const": "received",
+          "description": "Wild holds the batch durably and will run it through the source's\nflow. Drop it from the outbox.",
+          "type": "string"
+        },
+        {
+          "const": "processed",
+          "description": "The flow ran it through the sink. Lines Wild did not write as sent are\nlisted as conflicts. For information only.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "The flow failed the batch. Wild keeps it in its dead-letter, tells the\noperator, and retries it from its receipt. For information only;\nnothing to re-send.",
+          "type": "string"
+        },
+        {
+          "const": "expired",
+          "description": "Wild held the batch and removed it together with its rows: its\nsource's retention ended, or the operator erased or retracted them.\nDrop it from the outbox and never send it again; a re-send is answered\n`expired` and writes nothing.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "The door does not know the batch, or a state this contract version\ndoes not know. Keep it; re-send it.",
+          "type": "string"
+        }
+      ]
+    },
+    "Conflict": {
+      "description": "One line of a received batch that the source's flow did not write as\nsent.",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ConflictCode"
+        },
+        "line": {
+          "description": "The line's number in the batch body, counting from 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "params": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "line",
+        "code"
+      ],
+      "type": "object"
+    },
+    "ConflictCode": {
+      "description": "What the source's flow did with one line of a received batch instead of\nwriting it as sent. The other lines are written as sent (D0, D4). Every\ncode is information: none asks the producer to act or to re-send.",
+      "oneOf": [
+        {
+          "const": "source_rewrote_history",
+          "description": "A `natural` key already holds other values: the source changed its\nown history. The line is not written; Wild counts it on the device\nrecord and shows it in the inbox (D4).",
+          "type": "string"
+        },
+        {
+          "const": "generation_reassigned",
+          "description": "A `position` id already held other bytes — a restored file reached an\noffset sent before. Wild wrote the line under a generation it derived\nfrom the line itself (D4).",
+          "type": "string"
+        },
+        {
+          "const": "epoch_reassigned",
+          "description": "A `live` id already held other values — a restored copy reused an old\ncounter. Wild wrote the line under an epoch it derived from the line\nitself, and the reply's `new_epoch` directive hands the producer a\nfresh epoch for its next records (D4).",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "A code this contract version does not know.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One batch's state, as the status route reports it.",
+  "properties": {
+    "batch": {
+      "$ref": "#/$defs/BatchId"
+    },
+    "conflicts": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Conflict"
+      },
+      "type": "array"
+    },
+    "state": {
+      "$ref": "#/$defs/BatchState"
+    }
+  },
+  "required": [
+    "batch",
+    "state"
+  ],
+  "title": "BatchStatus",
+  "type": "object"
+}
