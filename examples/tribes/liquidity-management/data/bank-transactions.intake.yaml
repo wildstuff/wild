@@ -1,0 +1,9 @@
+# Intake mapping for the bank-transactions feed.
+# Every CSV column matches a `transaction` field 1:1, so NO explicit mapping
+# is needed — this is the ADR-0065 D5 auto-intake path: the runner derives an
+# identity column→field map from the target type's declared fields. The
+# template ships only `{target_type, columns, key}`; `columns` keys the
+# fingerprint, the runner fills the mapping.
+target_type: transaction
+key: [account_iban, date, amount, reference]
+columns: [date, amount, direction, counterparty, counterparty_iban, description, reference, account_iban]

@@ -1,0 +1,25 @@
+{
+  "tribe": "acme-liquidity",
+  "def": {
+    "slug": "invoice-collate",
+    "description": "When an invoice arrives: run two independent checks in PARALLEL (urgency · cash-discount window), gather their findings at ONE point (gather) and record them as a single check result.",
+    "entry": { "kind": "manual", "accepts": "invoice" },
+    "stages": [
+      { "id": "normalize", "archetype": "transform", "mechanism": "normalize-invoice", "execution": "deterministic" },
+      { "id": "fan",       "archetype": "transform", "mechanism": "normalize-invoice", "execution": "deterministic", "port": "broadcast" },
+      { "id": "urgency",   "archetype": "transform", "mechanism": "assess-urgency",    "execution": "deterministic" },
+      { "id": "cash-discount", "archetype": "transform", "mechanism": "assess-cash-discount", "execution": "deterministic" },
+      { "id": "collate",   "archetype": "join",      "mechanism": "collect",           "config": { "into": "checks" } },
+      { "id": "record",    "archetype": "sink-data", "mechanism": "atlas_put_record" }
+    ],
+    "edges": [
+      { "from": "normalize", "to": "fan" },
+      { "from": "fan",       "to": "urgency" },
+      { "from": "fan",       "to": "cash-discount" },
+      { "from": "urgency",   "to": "join:collate" },
+      { "from": "cash-discount", "to": "join:collate" },
+      { "from": "collate",   "to": "record" },
+      { "from": "record",    "to": "terminal:return(collated)" }
+    ]
+  }
+}

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 320" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#0b1220" flood-opacity="0.07"/>
+    </filter>
+    <marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 0 0.8 L 7 4 L 0 7.2" fill="none" stroke="#8c959f" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <rect x="2" y="2" width="1096" height="316" rx="20" fill="#ffffff" stroke="#d0d7de"/>
+
+  <text x="60" y="66" font-size="12" font-weight="700" fill="#8c959f" letter-spacing="1.6">BY ITSELF</text>
+
+  <!-- three steps -->
+  <g filter="url(#soft)">
+    <rect x="60" y="96" width="180" height="76" rx="14" fill="#ffffff" stroke="#d0d7de"/>
+    <rect x="286" y="96" width="180" height="76" rx="14" fill="#ffffff" stroke="#d0d7de"/>
+    <rect x="512" y="96" width="196" height="76" rx="14" fill="#f2fbf5" stroke="#bfe6cb"/>
+  </g>
+  <text x="84" y="128" font-size="14" font-weight="600" fill="#1f2328">Due date passes</text>
+  <text x="84" y="150" font-size="12.5" fill="#57606a">noticed nightly</text>
+  <text x="310" y="128" font-size="14" font-weight="600" fill="#1f2328">Reminder written</text>
+  <text x="310" y="150" font-size="12.5" fill="#57606a">polite · to the contact on file</text>
+  <text x="536" y="128" font-size="14" font-weight="600" fill="#1f2328">Sent — exactly once</text>
+  <text x="536" y="150" font-size="12.5" fill="#57606a">and noted in the books</text>
+  <path d="M 240 134 L 280 134" stroke="#8c959f" stroke-width="1.4" marker-end="url(#a)"/>
+  <path d="M 466 134 L 506 134" stroke="#8c959f" stroke-width="1.4" marker-end="url(#a)"/>
+
+  <!-- the money line -->
+  <line x1="770" y1="44" x2="770" y2="260" stroke="#ff9500" stroke-width="2" stroke-dasharray="7 6" stroke-linecap="round"/>
+  <g filter="url(#soft)">
+    <rect x="702" y="252" width="136" height="26" rx="13" fill="#ffffff" stroke="#ffd9a8"/>
+  </g>
+  <text x="770" y="269" text-anchor="middle" font-size="12" font-weight="700" fill="#c25e00">the money line</text>
+
+  <text x="812" y="66" font-size="12" font-weight="700" fill="#8c959f" letter-spacing="1.6">ALWAYS YOU</text>
+
+  <!-- your side -->
+  <g filter="url(#soft)">
+    <rect x="812" y="96" width="230" height="130" rx="14" fill="#fff9f2" stroke="#ffd9a8"/>
+  </g>
+  <g fill="none" stroke="#c25e00" stroke-width="1.8" stroke-linecap="round">
+    <circle cx="846" cy="130" r="10"/>
+    <path d="M 832 158 a 14 14 0 0 1 28 0"/>
+  </g>
+  <text x="876" y="127" font-size="14" font-weight="600" fill="#1f2328">Escalate further?</text>
+  <text x="876" y="149" font-size="14" font-weight="600" fill="#1f2328">Pay? Write off?</text>
+  <text x="876" y="174" font-size="12.5" fill="#57606a">asked, never assumed —</text>
+  <text x="876" y="192" font-size="12.5" fill="#57606a">and always on the record</text>
+
+  <text x="550" y="296" text-anchor="middle" font-size="13" fill="#8c959f">Wide courage where mistakes are cheap. None where they cost money.</text>
+</svg>

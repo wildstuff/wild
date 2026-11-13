@@ -1,0 +1,184 @@
+{
+  "$defs": {
+    "LineCode": {
+      "description": "Why one line was rejected before the batch was received.",
+      "oneOf": [
+        {
+          "const": "not_an_object",
+          "description": "The line is not one JSON object.",
+          "type": "string"
+        },
+        {
+          "const": "shape_unknown",
+          "description": "The line names no `shape@version`, or one the source does not declare.",
+          "type": "string"
+        },
+        {
+          "const": "field_undeclared",
+          "description": "A field the shape does not declare.",
+          "type": "string"
+        },
+        {
+          "const": "field_missing",
+          "description": "A field the shape requires is missing.",
+          "type": "string"
+        },
+        {
+          "const": "field_wrong_kind",
+          "description": "A field's value is not of the declared kind.",
+          "type": "string"
+        },
+        {
+          "const": "field_too_long",
+          "description": "A field's string is longer than its cap.",
+          "type": "string"
+        },
+        {
+          "const": "line_too_long",
+          "description": "The line is longer than the line bound.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "A code this contract version does not know.",
+          "type": "string"
+        }
+      ]
+    },
+    "RefusalCode": {
+      "description": "Why the door refused a whole request. Wild keeps nothing of a refused\nrequest.",
+      "oneOf": [
+        {
+          "const": "batch_refused",
+          "description": "A line fails its declared shape. The reply lists the rejected lines;\nthe producer fixes them and re-sends.",
+          "type": "string"
+        },
+        {
+          "const": "over_bound",
+          "description": "A body, a line or a field is over its bound (HTTP 413).",
+          "type": "string"
+        },
+        {
+          "const": "shape_version_undeclared",
+          "description": "A line names a shape version the source does not declare, or one it\nhas retired.",
+          "type": "string"
+        },
+        {
+          "const": "contract_unsupported",
+          "description": "The manifest's contract version is not served. `params.supported`\nlists the versions that are.",
+          "type": "string"
+        },
+        {
+          "const": "daemon_rewound",
+          "description": "The producer presented a commit mark higher than the daemon's: the\ndaemon was restored from a backup. `params` is a\n`Rewound`: what it still knows, and how many live\nlines of this device it still holds.",
+          "type": "string"
+        },
+        {
+          "const": "backpressure",
+          "description": "The device's received batches not yet processed are over its cap;\nkeep the batch and retry after `Retry-After` (HTTP 429).",
+          "type": "string"
+        },
+        {
+          "const": "unauthenticated",
+          "description": "The key does not verify, or opens no route of this request. Every\nfailure before a key verifies is this one code (HTTP 401).",
+          "type": "string"
+        },
+        {
+          "const": "unavailable",
+          "description": "Wild could not store the batch durably, so it received nothing. Keep\nthe batch and retry after `Retry-After` (HTTP 503).",
+          "type": "string"
+        },
+        {
+          "const": "paused",
+          "description": "The operator paused this device, or its whole producer. Nothing was\nreceived: keep the batch and retry after `Retry-After` (HTTP 503,\n`Retry-After: 60`). The key still opens the door, so the\nstatus route answers, with the `paused` directive, and once the\noperator resumes it the same key delivers again: no new pairing, no\nnew key, no new epoch. A revoked key is `unauthenticated` instead.",
+          "type": "string"
+        },
+        {
+          "const": "no_such_route",
+          "description": "No route of the contract answers this method and path (HTTP 404; 405\nfor a route's path asked with another method). `params` holds the\n`method` and `path` asked. Nothing was received: fix the request, as\nsending it again unchanged reaches nothing.",
+          "type": "string"
+        },
+        {
+          "const": "no_tools",
+          "description": "A call wait from a device whose manifest announced no tools: no call\never reaches it (HTTP 409). Announce the tools, or do\nnot wait.",
+          "type": "string"
+        },
+        {
+          "const": "tool_claimed",
+          "description": "An announcement claims a tool or a value another device of the same\ntribe already answers for (HTTP 409). Nothing was\nactivated: the announcement stays pending, and the device claims no\nvalue. `params` names the two connections: the `holder` device id\nwith `holder_connection`, and the `announcing_connection` that asked.",
+          "type": "string"
+        },
+        {
+          "const": "no_such_call",
+          "description": "An answer to a call no wait handed this device, or one already\nanswered or no longer awaited (HTTP 404). Drop it.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "A code this contract version does not know.",
+          "type": "string"
+        }
+      ]
+    },
+    "RejectedLine": {
+      "description": "A line the door rejected before the batch was received.",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/LineCode"
+        },
+        "line": {
+          "description": "The line's number in the body, counting from 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "params": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "line",
+        "code"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A refused request: `4xx`/`5xx` with an error body. Wild keeps nothing\nof it.",
+  "properties": {
+    "code": {
+      "$ref": "#/$defs/RefusalCode"
+    },
+    "error": {
+      "description": "A sentence for a human; never decided on.",
+      "type": "string"
+    },
+    "params": {
+      "additionalProperties": true,
+      "default": {},
+      "type": "object"
+    },
+    "profile": {
+      "description": "The profile that answered, when the request got that far.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "rejected_lines": {
+      "description": "For `batch_refused`: every rejected line.",
+      "items": {
+        "$ref": "#/$defs/RejectedLine"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "error",
+    "code"
+  ],
+  "title": "Refusal",
+  "type": "object"
+}

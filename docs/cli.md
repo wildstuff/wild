@@ -1,0 +1,1776 @@
+# The CLI
+
+> The **complete** command reference — every verb and flag is here.
+> Companion to ADR-0010 (the
+> rationale) and [`getting-started.md`](getting-started.md) (the
+> friendly first run). House style: `STYLE.md`.
+
+One binary, **three surfaces**. `wild` doesn't run a single all-in-one
+TUI; it splits by *what you're doing*:
+
+```mermaid
+flowchart TD
+    bin["the <b>wild</b> binary"]
+    bin --> CLI["<b>CLI verbs</b><br/>one-shot · scriptable<br/>--json everywhere"]
+    bin --> Chat["<b>wild chat</b> (or bare wild)<br/>conversational REPL<br/>native scrollback"]
+    bin --> Watch["<b>wild watch</b><br/>monitoring console<br/>Activity · Tribes · Inbox · Bus · Forge"]
+```
+
+- **`wild` / `wild chat`** — inline chat REPL with native scrollback / selection.
+- **`wild watch`** — full-screen monitoring console (Activity · Tribes · Inbox · Bus · Forge).
+- **CLI verbs** — one-shot, scriptable commands (`wild up`, `wild config llm …`).
+
+> 🔍 **Dig deeper — the surfaces.** Chat REPL design (slash matrix,
+> streaming): `inline-chat-design.md`. Watch
+> console layout: `watch-dashboard-design.md`.
+
+## The split rule
+
+> **"Wäre das in einem Bash-Script sinnvoll? → CLI. Multi-turn Konversation? → chat. Live-Monitoring? → watch."**
+
+A **CLI command** is one-shot, deterministic, scriptable, and exits
+cleanly. The **chat REPL** is the conversational surface — talk to
+the Elder or a tribe, paste a multi-line message, get the assistant's
+streamed reply inline; native terminal scrollback / selection / Cmd-C
+all work. The **watch console** is the monitoring dashboard — fixed
+panes for Activity, Tribes, Inbox, Bus, Forge, no input field.
+
+| Action | Surface | Reason |
+|---|---|---|
+| `wild up`, `wild down` | **CLI** | Lifecycle; CI scripts call them |
+| `wild status`, `wild doctor` | **CLI** | One-shot health check |
+| `wild report` | **CLI + app button** | The file an operator sends when something breaks (ADR-0295) |
+| `wild config llm add ...` | **CLI** | Provisioning script |
+| `wild tribe apply ./acme.tribe` | **CLI** | Idempotent ops |
+| `wild data query scan inflow --tribe acme` | **CLI** | Backup / migration |
+| `wild plugin add oci://...` | **CLI** | Operator install |
+| `wild metrics --json` | **CLI** | One-shot host metrics |
+| `wild traces list --json` | **CLI** | One-shot history read |
+| `wild content ls acme` | **CLI** | One-shot capture queue read |
+| `wild content rerun acme <blob_ref>` | **CLI** | Re-queue document enrichment |
+| `wild flows ls acme` | **CLI** | One-shot Flow read (ADR-0185) |
+| `wild flows show <flow> --tribe acme` | **CLI** | Flow spec + recent runs |
+| `wild flows feed <flow> --tribe acme` | **CLI** | Hand an item into a Flow (#4597) |
+| `wild flows try <flow> --file … \| --record T/K` | **CLI** | Try a Flow on a file, a row of it or a record; nothing stored (ADR-0385 D6) |
+| `wild flows run retry <run-id> --tribe acme` | **CLI** | Re-trigger a failed Flow run (#4112) |
+| Multi-turn chat with the Elder / a tribe | **chat REPL** | Interactive, scrollback-friendly |
+| `/blueprint edit` (suspend → `$EDITOR`) | **chat REPL** | Multi-step form |
+| `/diff <key>`, `/upload <path>`, `/copy`, `/save` | **chat REPL** | Context-aware slashes inline |
+| Live multi-tribe Activity + Bus + lifecycle indicators | **watch console** | Continuous render across panes |
+| Health summary at-a-glance | **watch console** | Always-visible alongside event stream |
+
+## Command families at a glance
+
+Every family supports `--json` for scripting and `--help` for the
+canonical flag list. Jump to one below, or read the full cheatsheet.
+
+```mermaid
+flowchart LR
+    L["<b>Lifecycle</b><br/>up · down<br/>status · doctor"]
+    P["<b>Provisioning</b><br/>config · plugin<br/>bootstrap · component-type"]
+    D["<b>Data &amp; specs</b><br/>data · spec · change<br/>forge · search"]
+    O["<b>Operate</b><br/>metrics · reconcile<br/>traces · loops<br/>llm usage"]
+    S["<b>Secrets &amp; access</b><br/>secret · user<br/>mcp · profile"]
+```
+
+## CLI cheatsheet
+
+### Lifecycle
+
+```bash
+wild up                    # spawn `wild-hostd` as a child + attach (default
+                           # per ADR-0035 §3.3.2.C); cli supervises the
+                           # daemon and drains it on Ctrl-C
+wild up --watch            # opens the watch console alongside the runtime
+                           # in this same process (headless without it)
+wild up --daemon           # spawn detached and return; daemon stays running
+                           # for subsequent `wild` invocations to attach
+wild up --mcp-http 127.0.0.1:7531
+                           # MCP-over-HTTP operator plane at an explicit
+                           # bind. Explicit = required: a failed bind
+                           # (port already held) aborts boot non-zero
+                           # (issue #3196); unset ⇒ profile `mcp_port`
+                           # fallback, best-effort
+wild up --rest-http 127.0.0.1:8088
+                           # ADR-0050 V1: also host the REST control/query
+                           # plane (OpenAPI at /api/v1/openapi.json). Opt-in
+                           # (MCP-over-HTTP already serves every tool);
+                           # loopback-only in V1. `WILD_REST_BIND` = same.
+wild up --customer-http 127.0.0.1:8090
+                           # ADR-0154 D3 / ADR-0083: bind hostd's private
+                           # CUSTOMER listener (the plane `wild-appd` proxies
+                           # to). Opt-in; keep it loopback in the single-box V1.
+wild up --with-appd        # also bring up the `wild-appd` end-user portal.
+                           # Foreground: a reaped-on-drop child (stops on
+                           # Ctrl-C). With `--daemon`: a DETACHED PID-file
+                           # sidecar (like nats/llama) that survives the
+                           # launcher and is reaped by `wild down`. Implies a
+                           # loopback `--customer-http`.
+wild down                  # shut down a running runtime
+wild status                # one-shot status snapshot; adds an `update:` line
+                           # naming the newer release AND its download page
+                           # when the daemon's verified index pull has seen one
+                           # (ADR-0210 A4). Silent otherwise — nothing pulled
+                           # yet, refresh off, and already-current are all
+                           # non-news. The URL is `wild_release_version`'s, the
+                           # same one the dashboard strip links
+                           # Adds a `restart:` line when the binaries on disk
+                           # are NEWER than the running daemon — a swap that
+                           # landed while nothing restarted (ADR-0210 D13).
+                           # Read from the `.wild-install.json` the installer
+                           # writes; an install with no marker (packaged app,
+                           # Homebrew, a build tree) stays silent, which is
+                           # "cannot tell", never "current"
+wild status --require-up   # exit non-zero when nothing answered, so a poll loop
+                           # can use this command as a liveness predicate. The
+                           # DEFAULT deliberately does not: "no wild runtime is
+                           # up" is a finding, printed on stdout with exit 0,
+                           # and scripts read it as one. Two in-tree pollers
+                           # were written as if the default carried the verdict
+                           # in `$?` — both broke on iteration one, and one had
+                           # no other check, so its timeout was unreachable. Ask
+                           # for the verdict by name. Under `--all` it asks
+                           # about the SET: non-zero only when no profile is up
+wild status --json         # same, NDJSON — carries `latest_release` (null when
+                           # the daemon knows of none) and `update_available`,
+                           # so a script can tell those states apart; plus
+                           # `installed_release` + `restart_pending` for the
+                           # disk-vs-process question, through the SAME
+                           # comparator (D19: one implementation)
+wild upgrade               # which release is installed, whether a newer one is
+                           # published, and how THIS install gets it — reports,
+                           # applies nothing (ADR-0210 D12/D16). Names the route
+                           # that fits the install: the installer re-run for a
+                           # scripted tree, `brew upgrade wild` for a Homebrew
+                           # one, the app's own updates for the packaged app. An
+                           # install `install.sh` did not make has no marker, and
+                           # the verb says so and touches nothing rather than
+                           # guessing from paths. Three states kept apart: no
+                           # runtime up, a runtime that has heard of no release,
+                           # and current — only the last one is "current"
+wild report --stdout       # the archive on STDOUT, the inventory on stderr —
+                           # what the app's menu item uses so it can ask the
+                           # operator WHERE to save before anything hits a disk
+wild report                # writes one .zip an operator can send us, and prints
+                           # what went into it. The newest 7 days of THIS profile's
+                           # logs, plus versions — never `models/`, never records or
+                           # transcripts, and no secret VALUE (only whether one is
+                           # configured), so producing it asks the system for no
+                           # password. Runs with the daemon DOWN, which is the case
+                           # it exists for. The app has a button for it: a customer
+                           # who installed the package has no `wild` on their PATH.
+                           # The inventory summarises the CONTEXT PRESSURE those
+                           # logs already carry (ADR-0308 D7): how many turns
+                           # measured their window fill, the median/p90/largest in
+                           # tokens, and how many came within 20% of the model's
+                           # window. Token counts only — derived from bytes already
+                           # in the archive, so it collects nothing extra and needs
+                           # no flag. Absent entirely on an install that never
+                           # chatted: "no data" and "no pressure" must not read
+                           # alike
+wild doctor                # walks every layer, prints pass/fail; targets the
+                           # resolved profile (--profile > WILD_PROFILE > active
+                           # pointer); a down bus degrades the NATS-backed rows
+                           # to dim skips instead of ending the walk
+wild doctor --fix          # ADR-0149 D7: regenerate a drifted write-once
+                           # config (nats.conf) from the current template —
+                           # previous file kept as a timestamped .bak, known
+                           # values (port / store_dir / operator token)
+                           # carried forward, unknown operator additions
+                           # reported against the backup (never silently
+                           # merged or dropped). No-op when the conf already
+                           # matches; restart `wild up` for the new bus
+                           # config to take effect
+```
+
+The default `wild up` mode (spawn-and-attach) keeps the operator UX
+of "block until Ctrl-C" while moving the host into a separate
+`wild-hostd` process. See [`docs/operator-daemon.md`](operator-daemon.md)
+for the service-managed install (LaunchAgent on macOS, systemd
+user-unit on Linux) that replaces the foreground supervision when
+the daemon should survive shell exit + reboots.
+
+### Chat / Watch
+
+```bash
+wild                       # bare → inline chat REPL (alias of `wild chat`)
+wild chat                  # explicit form; --tribe X to scope to a tribe
+wild watch                 # full-screen monitoring console (separate terminal)
+wild --host=remote:4222    # attach to a remote daemon (same flag works for CLI)
+wild config show           # print resolved connection config
+wild attach                # print the current default chat addressee
+wild attach <tribe>        # set the per-session default addressee (ADR-0001 §6);
+                           # persists to profiles/<active>/state/active-tribe,
+                           # consumed by chat/watch/TUI/MCP routing (default: root)
+```
+
+### Tribe ops
+
+> **`tribe apply` vs `package install` — different jobs.** `apply`
+> materializes a WHOLE authored Tribe from a bundle (ontology + workers +
+> Chief + live source locators + seed data) — the authoring/dev
+> primitive. `package install` grafts a sanitized, versioned DECLARATIONS
+> subset from a publisher (no locators, no workers). Author with
+> Elder/`apply`; distribute with `package`. See
+> [`tribe-creation-paths.md`](tribe-creation-paths.md).
+
+```bash
+wild tribe list                          # human table; an area column appears when any tribe declares area membership (ADR-0118)
+wild tribe list --json                   # NDJSON, one tribe per line; every row carries `area` (null = not in any area)
+wild tribe list --with-intent            # ADR-0008 — show originating session
+wild tribe status                        # host liveness — the same snapshot `wild status` prints
+wild tribe status --id <tribe>           # scoped by tribe. The runtime socket is single-tribe today, so a non-matching id prints a soft "no match" rather than erroring — an ACTIVE tribe in `tribe list` can still read "not currently scheduled" here. `--id` is a flag, never a positional
+wild tribe apply <bundle-dir>            # apply AND START (ADR-0031 amendment 2026-07-31): manifest + blueprint + ontology/seeds.yaml pinned + sample-data ingested + documents/** delivered + apps/ installed, then activated through the SAME readiness gate `tribe activate` uses
+                                         # a bundle spec the propose door would refuse
+                                         # (directive not bare, no H1) is refused here too,
+                                         # naming file + line — nothing is written (#6392)
+                                         # over a tribe that is already ACTIVE there is nothing to
+                                         # start: the lanes above are applied again, the running
+                                         # workers + schedules are NOT restarted from the bundle, and
+                                         # apply says so (exit 0). `tribe pause` then `tribe activate`
+                                         # restarts it from the bundle. A paused tribe is started
+                                         # An ACTIVE tribe the host runs nothing for (a component
+                                         # that cannot load, or the last daemon start left it down)
+                                         # is told it does NOT run, with the reason `tribe activate`
+                                         # prints; `tribe activate` alone starts it
+wild tribe apply <bundle-dir> --dormant  # register without starting — a new tribe stays dormant (idle until `tribe activate`); an existing one keeps its status
+wild tribe apply <bundle-dir> --retire   # ADR-0221 — ALSO carry out the retirements the bundle implies (a source or command its model no longer declares: the feed stops arming, the action leaves every surface). WITHOUT the flag apply reports them and leaves the running system alone — read that report first: an OLDER bundle retires everything the live model gained since it was cut
+wild tribe apply <bundle-dir> --allow-holes  # accept a DELIBERATE partial seed: a bundled data/*.csv that matches no intake mapping (or whose columns don't map) still prints per file with its reason, but the apply exits 0. WITHOUT the flag a seed file the bundle declares that did not load fails the apply — declared vs landed, never a green ✓ around a data hole
+wild tribe apply <bundle-dir> --overwrite    # #8713 — replace the tribe's model of record even though it changed since the last apply (a chat declaration, a model edit). WITHOUT the flag such an apply is refused, names the record's revision, and changes nothing: the bundle does not carry those edits. A re-apply over the record the previous apply wrote needs no flag
+wild tribe apply <bundle-dir> --confirm      # #12011 — your yes to what the bundle's model lets run WITHOUT asking you (a process step that pays, orders or mails by itself; an action marked as running unasked), as the chat asks before it commits. WITHOUT the flag such an apply stops before writing anything and names each one in your language. A re-apply that adds nothing new of this kind needs no flag
+wild tribe activate <tribe>              # start a dormant (or paused) tribe — the explicit start
+                                         # an ACTIVE tribe that runs is not started again. When it runs behind
+                                         # (its files carry a newer data model, or a component it runs was
+                                         # rebuilt in the catalog), it is rolled out onto that,
+                                         # without stopping it, after the same checks a start runs; a refusal
+                                         # comes in activate's words, nothing rolls out and its inbox row stays.
+                                         # Otherwise the command says it is already running and changes
+                                         # nothing. An ACTIVE tribe Wild
+                                         # does not run (a restored one, #10746) is started as it last ran;
+                                         # with no answer from Wild it says so and starts nothing. To bring a running tribe
+                                         # up to date when its inbox says it "runs an older data model" or
+                                         # "runs stale '<component>'", choose "Re-activate the tribe" on that
+                                         # row: it rolls the tribe out again on what it is now, without
+                                         # stopping it, after the same checks a start runs (a blocker
+                                         # review or a missing required secret refuses it in activate's
+                                         # words and the row stays open). It deploys what a start deploys
+                                         # (the tribe's cached deploy, with any new worker its files add),
+                                         # so a tribe installed from a bundle keeps its workers. A newer
+                                         # data-model change closes the older "runs an older data model"
+                                         # row as superseded; the newest row is the one that asks
+wild tribe pause <tribe>                 # pause a running tribe (unloads the workload AND drains its schedules → ~zero cost)
+                                         # stops what runs by itself: chief, workers, schedules, data
+                                         # import, flows (a hand-fed flow is refused with a sentence and
+                                         # not kept — start it again after resume), reactions to a write.
+                                         # Your own acts keep working: commands (verbs, `wild data upsert`),
+                                         # the chat, the actions of an order list you confirmed. A write
+                                         # during the pause triggers no follow-up check after resume (#9788)
+wild tribe resume <tribe>                # resume a paused tribe (re-deploys + re-arms schedules)
+                                         # a NEW requirement the tribe cannot meet yet (a spec names a
+                                         # capability nothing installed provides) starts it as it last
+                                         # ran, and a `capability-missing` notice stays open until a start
+                                         # meets it. The same rule holds at daemon start and for an
+                                         # activate of a PAUSED tribe; a dormant tribe never ran and is
+                                         # refused (unmatched-capability) as before (#9405)
+wild tribe unarchive <tribe>             # ADR-0030 — the door OUT of archived: restore an archived tribe to dormant (inert but present); run `wild tribe activate` after. Refused with invalid-transition when the tribe isn't archived
+wild tribe reflect <tribe>               # run the tribe's SELF-REVIEW now instead of waiting for its cron (`--window-days 7`)
+wild tribe backup <tribe>                # ADR-0117 — archive tribes/<tribe>/ PLUS the tribe's profile-level apps (ADR-0154 D9: the apps whose `default_tribe` is this tribe — spec, i18n sidecar, .published marker, history) → ./<tribe>-backup.tar.gz (excludes the rebuildable projection); local FS op, no daemon needed. The bundle starts with a manifest.yaml (ADR-0149 D8: format/wild/layout versions + per-file sha256). An app naming no tribe is in no backup and is reported by name. Back up while the tribe is idle.
+wild tribe backup <tribe> --out <path>   # write the archive to a chosen path
+wild tribe restore <archive.tar.gz>      # ADR-0117 — unpack a tribe backup under the active profile; the read-model rebuilds from the event log on next open. Validates the manifest first (ADR-0149 D8): newer bundle format → refused naming both versions; layout mismatch → refused until restore-time migrations arrive (ADR-0149 D6); checksum mismatch → refused naming the file; a manifest-less generation-1 bundle stays accepted. Refuses to overwrite unless --force — including an app-id collision in the shared apps/ dir, named before anything is written. Before anything is written it also asks what a create asks (#10747): refused, in plain words, when the tribe's name — or a name its backup says it once had — already leads to another tribe on this profile, when the installation already holds every tribe it may, or when the tribe was switched on at backup time and the profile already runs as many tribes as it may at once (`WILD_TRIBE_MAX_ACTIVE`). A restored tribe answers to its old names. The output names the one command that starts it: a tribe switched on at backup time starts with `wild tribe activate <slug>` while Wild runs (or with Wild's next start); one that was off stays off until activated (#10746). A backup taken BEFORE the tribe's lake erased values on the operator's order (a device erasure, a retention, a file or source taken back) is refused in the operator's language, naming the date of the last erasure and the way on: restore a backup taken after it (#11837). Routine removals erase nothing and refuse nothing: a mirror run's vanished item, a reprocess, example data cleared. `--force` does not override this; a manifest-less bundle, whose age is unknown, is refused once any erasure is recorded
+wild tribe restore <archive.tar.gz> --force  # replace an existing tribe with the archive's copy
+wild tribe show <id>                     # render the bilateral DesignDoc for <id>
+wild tribe concept <tribe>               # ADR-0367 D4 — the tribe's domain model read back in plain sentences, in the operator's language: what each thing is, its fields, its states and who may move them, where its records come from, and how many stored records break each rule. The counts are the daemon's: the verb asks the operator plane for the same reading the Elder's `ddd_show_model` concept form shows (#13647), and starts the daemon when it is down, so the CLI and the Elder cannot say two documents. When the counts cannot be had, the document says for each such rule that its stored records could not be counted — never that every record keeps to it. `--json` prints the sections, each sentence naming the element it describes
+wild tribe config <tribe> <plugin> <primitive>
+                                         # adopt or disable a plugin primitive (ADR-0141)
+```
+
+**Starting is the default (ADR-0031 amendment).** Pointing `apply` at a
+prepared bundle is a decision already taken, and a tribe with its data loaded
+but its time-driven writes idle (the ADR-0157 aging tick) reads as broken
+rather than pending. The start does NOT ride `HDR_DEPLOY_START` — that bridge
+is record-only and would start *around* the readiness gate. Apply registers
+dormant, then walks `tribe activate`'s own door, so the active-tribe cap,
+`NeedsSecrets`, `UnmatchedCapability` and `NeedsGenesis` all still apply. A
+refusal is an outcome, not an apply failure: the ontology is pinned, the data
+is in, and the tribe stays dormant with the reason and the retry command. This
+changed `apply` only — `tribe_create` in chat still pins a dormant sketch.
+
+**`--dormant` registers; it does not stop.** The registration writes a NEW
+tribe as dormant and leaves an existing tribe's status as it was, so
+`--dormant` over a running tribe leaves it running. Apply reads the status of
+record once the registration has landed and says which it was: "registered
+DORMANT … run `wild tribe activate`" only for a dormant tribe, and for an
+active one that it stays active and that `wild tribe pause` stops it (#9338).
+
+**The apps lane.** A bundle's `apps/<id>.yaml` specs are installed into the
+PROFILE-level app plane (`<profile>/apps/`, ADR-0154 D9) — until this existed,
+only the package lane wrote there and a tribe bundle's apps were dead files.
+The installed copy is stamped with the tribe it was applied as (a bundle omits
+`default_tribe` to stay portable under `--as`; a profile-level app has no
+carrier tribe, so the binding must be written down). Re-apply follows the
+seeded-file baseline: unchanged since we wrote it → refreshed; edited by the
+operator → kept, and the report says their copy is behind; no baseline (a
+profile that predates the lane) → adopted, nothing overwritten. An id another
+tribe's bundle already owns is refused by name — `apps/` is one shared
+namespace.
+
+**The documents lane.** A bundle's `data/*.csv` feeds the store; its
+`documents/**` feeds the tribe's FILE store
+(`tribes/<tribe>/files/documents/…`), where a declared document connector
+actually reads — otherwise a bundle could ship a document door and eight
+sample scans and still hand the operator an empty inbox. Delivery is
+**one-shot per path**, recorded in a per-tribe ledger: a scan you processed
+and deleted does not come back on the next apply, and a delivered file is
+never overwritten, but a sample ADDED by a later bundle version still arrives.
+The report line is `documents:  N sample document(s) delivered …`.
+
+A model the cross-layer gate refuses changes nothing and prints under
+"Nothing was changed — something in the model is not right yet:" in the
+operator's language (the profile's language, else the operator's recorded
+one, else the system's). A flow's flaw reads as the same sentence the Elder
+and the API say for it (one source: `wild_ddd::compiler::flow_flaw_said`);
+while a flow holds an expression the gate cannot read (or `today()` outside
+a read-time check), that is all it says about the flow — its other findings
+follow once the expression reads. Any other gate finding prints as the gate
+wrote it.
+
+`wild tribe apply` on a `ddd`-stamped bundle additionally surfaces two
+ADR-0157 D4 behaviours:
+
+- **Compile notices** — after the (errors-only) cross-layer gate passes,
+  the non-blocking NOTICES lane prints each teaching finding as a
+  `notice: …` line beside the usual warnings (dead mirror vocabulary,
+  a state member nothing writes, a clock-shaped process guard nothing
+  ever produces, `aging:` declared without its `requires:` marker or on
+  a build lacking the reactive lane). Notices never block the apply.
+- **`requires:` feature tokens** — a bundle whose `manifest.yaml` names
+  a runtime capability token this daemon does not know (known set today:
+  `aging`) is REFUSED before any side effect, naming the missing
+  token(s) — never silently applied minus the behaviour it depends on
+  (ADR-0157 D4.4). Absent/empty `requires:` applies as before.
+
+### Configuration (ADR-0009 — RPC-routed)
+
+```bash
+# LLM adapters
+wild config llm list                     # tabular
+wild config llm list --json              # NDJSON
+wild config llm add --kind component --slug openai --id kimi \
+  --model kimi-k2-0711-preview \
+  --endpoint https://api.moonshot.ai/v1/chat/completions
+wild config llm remove <id>
+wild config llm test <id>                # ping the adapter, no provisioning
+
+# Profile / connection
+wild config show                         # resolved cli.toml chain
+wild config show --json
+```
+
+Config-touching CLI verbs route through the daemon over NATS —
+there's one source of truth. The TUI mirrors with `/config llm
+<op>` slash commands.
+
+### Plugins
+
+```bash
+wild plugin add oci://ghcr.io/wildstuff/plugins/tools/math-tools:0.1.0 \
+  --provides wild:tool-provider/tools@0.4.0
+wild plugin add oci://example/chief-research:0.1.0    # ADR-0014; kind is derived
+wild plugin add ./target/wasm32-wasip2/release/llama_embed.wasm
+# A FORGED build is not a plugin file: its wasm installs only once its
+# catalog row is approved (`wild component-type approve <name>`) — the
+# plugin door refuses a pending or revoked build and names the verb.
+                                         # installs as `llama-embed`: the slug is
+                                         # the artifact name in the house shape,
+                                         # because `cargo` writes `_` where the
+                                         # crate has `-` and every reference to a
+                                         # plugin (adapter entries, bootstrap.yaml)
+                                         # uses the `-` form. `--name` overrides.
+wild plugin list                         # added plugins
+wild plugin list --json
+wild plugin show <slug>                  # sidecar + derived primitive roles
+wild plugin remove <slug>                # everything `add` wrote: sidecar, wasm, .cwasm;
+                                         # errors when nothing is installed under <slug>;
+                                         # forgets its grants, connector scope and
+                                         # switch-offs; a bundled plugin stays off.
+                                         # Each tribe's action for one of its tools is
+                                         # taken back at that tribe's next lake open
+                                         # (a restart at the latest), with its grants
+                                         # and rules; a call of it still waiting in the
+                                         # inbox closes, saying the tool is no longer
+                                         # installed. Only after a boot where every
+                                         # plugin answered — after any other, nothing
+                                         # is taken back: the inbox says which plugin
+                                         # did not answer and what to do (and a WARN
+                                         # `not-whole` in the log), until a start where
+                                         # every plugin answers closes the row
+wild plugin upgrade <slug>               # ADR-0223: apply the feed-offered update
+                                         # (daemon door: compare → pull → pin → live reload)
+wild plugin replace <target> --name <slug>  # manual re-install from an explicit
+                                         # target (alias: `update`, deprecated)
+
+# ADR-0153 D5 — whose signature this profile trusts. A plugin's tier is DERIVED
+# from which key signed its contract: Wild's own key ⇒ `verified`, a publisher
+# you added ⇒ `community`, anything else ⇒ `unknown` — installable, but granted
+# nothing. Without an entry here, only Wild's own plugins rise above `unknown`.
+# `--tier verified` is refused: that tier means "signed by the key shipped with
+# Wild", which no publisher you add can be. Lowering one to `unknown` is yours;
+# raising is not.
+wild plugin publisher ls                 # who this profile trusts
+wild plugin publisher add <name> --key <64-hex> [--tier community|unknown]
+wild plugin publisher rm <name>          # anything they signed drops to
+wild plugin install <slug>               # bundled-plugin shortcut: pull the canonical
+                                         # ghcr image, install and enable it; a failed
+                                         # download installs nothing — fix the cause and
+                                         # run it again (only `add --no-pull` registers
+                                         # a plugin without its bytes)
+wild plugin sync                         # offline local-dev: materialise the bundled
+                                         # in-tree plugins into system/plugin-cache/
+wild plugin enable <slug>                # flip the profile's bootstrap.yaml entry
+wild plugin disable <slug>               # same effect as `wild bootstrap disable`;
+                                         # its tools' actions stay — it is still installed
+wild plugin uninstall <slug>             # disable + remove in one shot
+wild plugin config <slug> <key> <value>  # per-profile key, validated against the sidecar
+wild plugin grant <slug> <cap>           # capabilities on top of the declared trust tier
+wild plugin grants [--slug <s>]          # the override table
+wild plugin revoke <slug> [<cap>]        # omit the cap to drop every override
+                                         # `unknown` on its next load
+```
+
+### Component-types (ADR-0009 Phase 5 / ADR-0012)
+
+```bash
+wild component-type list                 # approved-only by default
+wild component-type list --all           # incl. pending / revoked
+wild component-type show <type-name>
+wild component-type approve <type-name>  # operator-only; runs the golden suite and
+                                         # says what it found ("5 of 5 checks passed"
+                                         # / "approved, unverified") — ADR-0297 D3 —
+                                         # and what makes it do something: a forged
+                                         # tool-provider is NOT callable until
+                                         # `wild plugin add <wasm> …` + a restart (#6389)
+wild component-type revoke <type-name>
+wild component-type rollback <type-name> # operator-only; swaps the row back to the
+wild component-type add <name> --image <ref>   # import from an OCI image; the
+                                               # daemon validates the WIT surface
+wild component-type upload <name> --file <p>   # BYO Wasm from local disk
+wild component-type certify <name> --tribe <t> --certifier <id>
+                                               # re-runs the golden suite and
+                                               # refuses unless it PASSES
+                                         # build it replaced and restores the approval
+                                         # state THAT build recorded (never grants one);
+                                         # installs and deploys nothing — the reply
+                                         # names the next step — ADR-0301 D3
+```
+
+### Bootstrap inventory
+
+```bash
+wild bootstrap list                      # list seed plugins
+wild bootstrap add <name> <oci-ref>      # add a Tier-2 entry
+wild bootstrap remove <name>
+wild bootstrap enable / disable <name>
+wild bootstrap sync                      # refresh lock from manifest
+wild bootstrap reset                     # restore embedded default
+```
+
+### Data (`wild:data` membrane)
+
+The event-sourced data membrane (default-on). All ops are tribe-scoped
+via `--tribe <slug>`; `--json` everywhere. The CLI is the file/operator
+second authority over the SAME store the WIT interfaces serve (one
+backend, no second writer).
+
+```bash
+# Ontology types (FS-canonical `types/<slug>.yaml` author form)
+wild data type apply ./inflow.yaml --tribe acme   # pin a type (new slug → v1; changed → next version)
+wild data type ls --tribe acme                      # list pinned types
+wild data type show inflow --tribe acme            # show one type (latest, or --version N)
+# What `show --json` prints, `apply` takes back: unchanged it is a no-op, with
+# one edit it applies exactly that edit. The host's own columns it prints
+# (`source_id`, `composed_by`, …, marked `internal`) need no stripping, and
+# need no edit when yours changes them: an `authored` field added to a source
+# mirror lets the host's write-plane columns take hand writes too.
+wild data type show inflow --tribe acme --json > inflow.json && wild data type apply inflow.json --tribe acme
+
+# Typed SchemaDelta migration of an EXISTING pinned type — the operator's
+# HEADLESS migration surface. The pin seam refuses a BREAKING re-pin ("route
+# it through propose_migration"); this verb IS that route for the CLI: the
+# delta is compat-classified first (the ONE rule the pin seam uses), and a
+# Breaking delta (required-flip, field/relation removal, enum shrink, retype)
+# is refused unless --allow-breaking confirms it — the explicit flag is the
+# operator's ratification (High-risk, schema-migration-classed, audited).
+# Delta JSON, e.g.: {"set_required":[{"field":"effective_status","required":true}]}
+wild data type migrate invoice --delta-file ./delta.json --tribe acme
+wild data type migrate invoice --delta-file ./delta.json --allow-breaking --tribe acme
+
+# Read records
+wild data query scan inflow --tribe acme --limit 100   # current records (live head)
+wild data query scan zahlbar --tribe acme              # an interface: its implementers' records, each with its type_slug
+wild data query get inflow D001 --tribe acme           # one record by key
+wild data query aggregate inflow --tribe acme \
+    --op sum --field amount_eur                          # count | sum (decimal → exact string)
+
+# Derived views (Phase-2 virtual entity — deterministic, decimal-exact)
+wild data query view cash-coverage --tribe acme --as-of 2026-01-01
+# → computes the declared measures over the view's sources, windowed on
+#   the shared date dimension from `as-of`; returns measures + lineage/drift.
+
+# Privileged ingest of `source-mirror` records from a JSONL file
+wild data ingest inflow ./inflow.jsonl --tribe acme   # one {"key":…, "value":{…}} per line
+# ADR-0065 D2 — stamp the external origin so a real `source` + `mirrored_from`
+# edge is recorded ("where did this come from?"); absent ⇒ a `cli-ingest` dock.
+wild data ingest price ./prices.jsonl --tribe fred \
+  --source-kind web-page --source-uri https://competitor.example/prices
+
+# Privileged upsert of AUTHORED records — the authored-write twin of ingest
+# (authored fields take upsert, source-mirror feeds take ingest; on a
+# mixed-origin type the fold merges the authored patch onto the mirror).
+wild data upsert invoice ./verdicts.jsonl --tribe acme
+
+# LLM-prompt Function evals — golden-case corpus for `llm-prompt`-backed
+# Functions (ADR-0204 PR1). Runs each case through the SAME `llm_prompt`
+# tool path production uses, scores k-of-n trials, and writes
+# `trials.jsonl` + `summary.{md,json}`. Advisory only — it reports, it
+# never gates deploy.
+wild data function llm-prompt-eval acme partner_risk_band   # one function
+wild data function llm-prompt-eval acme                     # every *.llm-prompt-eval.yaml in the tribe
+wild data function llm-prompt-eval acme partner_risk_band --case short-terms-are-low
+wild data function llm-prompt-eval acme partner_risk_band --trials-k 2 --trials-n 3 --out ./eval-run
+```
+
+### Snapshots (`wild snapshot` — ADR-0201 PR3)
+
+Named bitemporal bookmarks. A snapshot pins a `(known_at, valid_at)` pair
+of dates by name so reports, apps, and read tools can reference a stable
+as-of view without repeating dates. The store is profile-global, not
+tribe-scoped, and works the same on either data plane: each tribe reads the
+Kenntnisstand date at its own log position, so a snapshot holds no position.
+`--json` everywhere.
+
+```bash
+wild snapshot create year-end-2025 --valid-at 2025-12-31 --known-at 2026-01-15
+wild snapshot ls                                              # list all snapshots
+wild snapshot show year-end-2025                              # show the pinned coordinates
+wild snapshot rm year-end-2025                                # delete (alias: remove)
+wild snapshot remove <id>                # delete a snapshot (alias: rm)
+```
+
+A snapshot used as `snapshot: year-end-2025` in a read context resolves to
+the same coordinates as passing the raw `known_at`/`valid_at` values. If both
+a raw axis and `snapshot` are supplied, the raw axis wins (explicit beats
+named). At least one of `--valid-at` or `--known-at` is required; both
+are dates (`YYYY-MM-DD`).
+
+A Kenntnisstand of today or later still moves: the saved date reads what is
+recorded until the end of that day in UTC (01:00 or 02:00 German time), and
+`create` says so. A snapshot with no `--known-at` reads what is known when
+each report runs. A snapshot an older build saved on a log position is still
+listed by `ls`, but `show` and every report naming it refuse it in plain
+words until it is saved again with a date. The refusal names the command
+that does so, carrying the snapshot's `--valid-at` when it has one, because a
+save replaces the whole snapshot.
+
+### Add an MCP server (`wild mcp-server add`)
+
+Adds an MCP server reached over HTTP, once for the whole installation
+(ADR-0410). Adding is the operator's own action — this verb or the
+dashboard; no Elder turn or chat adds a server. With `--with-key` the key is
+asked for without echo and kept in the key store as `mcp-<name>`; the
+server entry holds only that name. The verb first shows what the server
+offers, then asks. A typed key goes along for that one look and is stored
+nowhere until the yes; the look reaches only the address typed and follows no
+redirect. A server without a key is looked at the same way, with no key sent. On the yes the key is stored, and the verb signs in, lists, saves and
+joins the server. A server that does not answer or refuses the key is refused
+in plain words, and the key that add stored is taken out again.
+
+Afterwards the server is in no tribe. Switch it on in a tribe and all its
+functions are usable there; switched off, none.
+
+```bash
+wild mcp-server add crm https://crm.example.com/mcp --with-key
+wild mcp-server add docs https://docs.example.com/mcp --yes
+```
+
+### Switch an MCP server in a tribe (`wild mcp-server on` · `off`)
+
+An added server has one switch per tribe, the same row the dashboard's
+tribe plugin card shows as `mcp-<name>`. On means every function of the
+server is usable in that tribe; off, none. There is no per-function right:
+a function the operator does not want anywhere is taken out (below). A
+switch-off that stops a flow or a command in the tribe names each one and
+switches only on the yes (`--yes` answers it ahead).
+
+```bash
+wild mcp-server on crm --tribe vertrieb
+wild mcp-server off crm --tribe vertrieb
+```
+
+### Take one function out (`wild mcp-server take-out` · `put-back`)
+
+Takes one function of an added server out of every tribe, by the server's
+own name for it, and puts it back. A function taken out stays out however
+often the server lists it again; the server's other functions are not
+touched. The line written is the server's `deselected:` list. A name
+the server does not list right now is taken out all the same: a server may
+drop a function for a while, and it must come back out.
+
+```bash
+wild mcp-server take-out crm delete_customer
+wild mcp-server put-back crm delete_customer
+```
+
+### Connector status (`wild connector status`)
+
+PR-F — dedicated operator status for configured intake sources. Reports
+slug/name/locator/target-type, armed/disarmed state, triggers, last run,
+current run, last fault, and credential readiness for each source.
+
+A run that finished but **parked** what it read is reported as
+`N file(s) waiting for their columns to be mapped`, and counted in the
+roll-up as `awaiting_mapping` — parking is the designed outcome for an
+unknown shape, so the job status alone stays `done` and the source used
+to read `ready and idle` while ingesting nothing.
+
+```bash
+wild connector status                 # active tribe (or root)
+wild connector status acme            # specific tribe
+wild connector status acme --json     # compact JSON for jq
+```
+
+> **No REST port needed.** This and the other operator-plane verbs (`wild
+> flows`, `wild content`, `wild provisioning`) dial the daemon's always-armed
+> local socket at `<profile>/system/api.sock` — a unix-domain socket, or a
+> per-profile named pipe on Windows — the same router behind the same
+> auth membrane the HTTP door (TCP port) serves. A fresh profile ships `rest_port: null`
+> (ADR-0149 P3c) and these verbs work anyway.
+>
+> An explicit HTTP door still wins when you set one: `rest_port:` in
+> `profile.yaml`, or `WILD_REST_BIND=127.0.0.1:8088` for a single run — the way
+> to point the CLI at a non-default or remote daemon.
+
+### WCAG contrast calculator (`wild contrast`)
+
+Compute the WCAG 2.1 relative-luminance contrast ratio between two sRGB
+colors and report AA/AAA pass/fail for normal and large text. Colors can be
+`#RGB`, `#RRGGBB`, or a CSS color name (`black`, `white`, `red`, `orange`, …).
+
+```bash
+wild contrast black white                # 21.00:1 — all levels PASS
+wild contrast '#777' '#fff'              # 4.48:1 — AA normal FAIL, AA large PASS
+wild contrast orange white --json        # machine-readable JSON output
+```
+
+### Egress allowlist (`wild egress` — ADR-0159)
+
+Governed outbound egress is **default-deny**: a forged source connector (e.g.
+a mobile.de importer) can't reach a host until it's on `system/egress.yaml`.
+`wild egress allow` is the guided writer — it appends a narrow, tribe-scoped
+destination idempotently, so an operator satisfies a connector's
+`egress-needed` grant without hand-editing YAML. (The dashboard/Elder path is
+the `wild.system.egress.add` governed action.)
+
+```bash
+wild egress ls                                  # print the current allowlist
+wild egress remove forge-search-web213223       # take a destination away (the counterpart of allow)
+wild egress allow mobile.de --tribe acme        # allow one host for one tribe
+wild egress allow api.mobile.de mobile.de       # several hosts (all tribes if --tribe omitted)
+wild egress allow mobile.de --methods get,post  # restrict to specific methods (default: all)
+wild egress allow 127.0.0.1:43227               # a service on this machine names its port
+wild egress allow http://example.test:8080      # a scheme comes off; the port is kept
+# ADR-0167 D3 — bind a provider token as `Authorization: Bearer` on the destination
+# (a channel's outbound token; the alias resolves from keychain/env, never enters the guest):
+wild egress allow gate.whapi.cloud --bearer-secret whapi-api --bearer-binding whapi_api
+# the shape the component declared rides along (default `bearer`): `basic` ·
+# `header:<Name>` · `query:<param>` · `path:<segment>` — a telegram bot token is `path:`
+wild egress allow api.telegram.org --bearer-secret tg-bot --bearer-binding WILDBOTTOKEN --inject path:WILDBOTTOKEN
+wild egress undeclared-logins                   # logins components used without declaring them
+wild egress undeclared-logins --tribe acme      # one tribe's; --json for the report as JSON
+```
+
+`wild egress undeclared-logins` lists, per tribe and component, each login a
+call named that its component neither declares nor was given (ADR-0378 D2),
+with how many calls and when. Such calls still go out; the list is what you
+read before deciding they should not. It reads the daemon log
+(`system/logs/wild-hostd.log*`), so it works with the daemon stopped, and it
+always says how many outbound calls it read and over which time. "No
+undeclared login" therefore means none in that span, and "nothing to judge
+yet" means no call was recorded at all. A row written before rows named their
+component reads as "a component the record does not name".
+
+A host is read the way a call names it, which is how the forge's grant reads
+one too. `127.0.0.1:43227` or `http://example.test:8080` is stored as the host
+plus its port, and the grant opens that port only. A public host given without
+a port is opened on every port.
+
+An address on this machine or the local network (`127.0.0.1`, `localhost`,
+`192.168.…`) must name the port its service listens on; `http://` or
+`https://` names port 80 or 443. Given bare, it is refused with what to type
+instead (e.g. `127.0.0.1:8080`), and nothing is written. An address with a
+path, and one grant that gives some hosts a port and others none, are refused
+the same way. Each refusal says why in a sentence, and the Elder and a
+component's ask are refused before the grant is put to you.
+
+Even with the port named, a call to a private address is still held by the
+private-address guard. `wild egress allow` does not lift that guard (#10493),
+so its grant only records which port the call would use. The one grant that
+lifts it is the operator's own yes in the chat (#11922, ADR-0090 §7): ask
+the assistant to open the address, and it asks you whether to open exactly
+that address on that port, saying it is inside your own network.
+
+### Producer ingest door (`wild ingest` — ADR-0365)
+
+A **producer** is a program outside the daemon — any language, written by a
+developer or built by an agent — that streams records into a tribe through the
+ingest door, a separate, narrow listener beside the operator plane. A
+producer reaches it one way, wherever it runs: over `https://`, pinning the
+door's own certificate, with a pairing file (ADR-0365 D1, amended
+2026-10-28). The operator opens the network door with `wild ingest listen on`
+for a program on this computer (loopback, encrypted) or `on --network` for a
+laptop or a VM (the local network, encrypted); the daemon makes the door's
+certificate the first time. Wild's own tools on this computer still use
+`<profile>/system/ingest.sock`, which a connector is no longer taught. The
+switch takes effect at once and is kept in the profile. If another program holds the kept port, the door moves to a free one
+and says so — a pairing file handed out before must be made again. The dashboard's *Pair another
+connection* (*Weitere Verbindung koppeln*) in the tribe's settings is the same switch. `WILD_INGEST_BIND` pins the
+listener for a run instead (an engineer override, `config-vars.md`). `pair`,
+`listen` and `erase` run in the daemon; the other verbs write the door's
+stores under `system/ingest/` directly, and a running daemon sees the change
+at its next request.
+
+```bash
+wild ingest address                         # where producers reach the door: its socket, and the address another machine dials if the network door is open
+wild ingest listen                          # where the network door stands: off, this computer, or the local network
+wild ingest listen on                       # open it for programs on this computer, encrypted
+wild ingest listen on --network             # open it on the local network, encrypted: a laptop or a VM
+wild ingest listen off                      # close it: no connector can be paired
+wild ingest pair                            # a pairing file the connector starts with (`--pairing <file>`): https address + certificate pin + one-time code, owner-only (valid 10 minutes)
+wild ingest pair --minutes 30               # the same, valid longer
+wild ingest pair --name "Büro-Laptop"       # the same, for the connection you name: it is shown under that name
+wild ingest announcements                   # producers that announced themselves, and where each stands
+wild ingest activate 3f2a9c01 --tribe acme  # let an announced producer deliver into a tribe
+wild ingest activate 3f2a9c01 --new-tribe   # found a tribe of its own for it and let it in; what it delivers waits to be modelled (needs the daemon)
+wild ingest reject 3f2a9c01                 # decline an announced producer
+wild ingest pause Büro-Laptop               # hold a connection's deliveries back: they wait on its computer
+wild ingest pause --producer probe          # the same for every connection of a connector
+wild ingest resume Büro-Laptop              # let it deliver again, with the same key
+wild ingest revoke Büro-Laptop              # cut a connection off: its key stops opening the door
+wild ingest revoke Büro-Laptop --producer probe  # the same, when two connectors have a connection of that name
+wild ingest erase Büro-Laptop --yes         # erase everything a connection delivered (needs the daemon)
+```
+
+`wild ingest erase` answers within the request. An erasure that takes longer
+goes on in the daemon: the verb says it runs, and the outcome reaches the
+tribe's inbox (#12801).
+
+What the operator pairs, pauses, revokes and erases is a **connection** —
+one connector on one computer (#11711). Printed lines name it by its connector
+and the name given at pairing („namens „Büro-Laptop““, #12036), or unnamed by
+where it runs: „auf diesem Computer“ for a connector on the socket, „über das
+Netz“ for one paired over the network; a line that would read like another of
+its connector's adds when it was paired or announced. The listing shows no
+`dev-…` id (#12256). The verbs take the connection's name, or the id its line
+in `wild ingest announcements` starts with; a name more than one connection has
+changes nothing and lists those ids. The wire's `device` id still works, and
+its value name in `--help` is `CONNECTION`.
+
+`pair --name <name>` names the connection the code pairs, in your words
+(`"Büro-Laptop"`): the announcement it opens and the connection it becomes carry
+that name, and the dashboard and the Elder show the connection under it
+(`--computer`, its old name, still works and is not listed in `--help`).
+Without `--name`, `pair` asks for the name on one line at a terminal;
+with no terminal, or an empty answer, the code has no name. A name is 1 to 40
+characters on one line — another is refused in words, and no code is made.
+
+`pair` prints where the pairing file lies, never the code
+(`<profile>/system/ingest/pairings/<name>.json`, `buero-laptop.json` for
+„Büro-Laptop“, `connector-<id>.json` with no name; ADR-0365 D1 amendment,
+step 4). Only your own user can read it. The connector starts with
+`--pairing <file>` and removes it once it has announced itself. For another
+computer, `pair` also names where the file goes there,
+`~/.wild-kit/pairings/<name>.json`, and `wild-kit paste-pairing <name>`, which
+keeps the pairing text copied in the dashboard's dialog when pasted into it in
+a terminal of your own. Tell a coding agent the path, never the file's
+contents. The three steps: `pair-a-connector.md`.
+
+Activating into a tribe that is not running says so: the producer is placed,
+and its deliveries wait until the tribe runs. Either way the activation names
+the connection the producer delivers as (its `device` id, `dev-…`) — the id `revoke` and `erase` take.
+
+A producer still waiting for your yes, whose tribe is known, ends its line
+with what its yes leaves waiting (`Was es liefert, wartet an der Tür, bis du
+mit dem Elder im Chat von Werkstatt modellierst, was seine Daten für deinen
+Tribe bedeuten. Dafür wird keine Tabelle angelegt.`): the yes creates no
+table, and a shape no business object of the tribe takes waits until you
+model it. Nothing is added when the tribe's model takes every shape. A
+producer whose tribe you still have to choose says nothing of it yet. The
+yes says the same once given (`wild ingest activate`).
+
+A line also names the functions the connector's build announces (ADR-0398
+D14), in the order its manifest lists them — `Funktionen: agent_start,
+host_load`. This listing reads no yes: how each function stands in the tribe
+— released, waiting for the yes, no longer offered — is said by the report
+the connector's card in the dashboard and the Elder read, never by this line,
+so the two cannot disagree.
+
+A placed producer's line also says the role this tribe judges the connection's
+calls as (ADR-0398 Q3) — `Rolle: Redakteur` until the operator switches it to
+`Freigeber` on the connector's card. It reads the same key store the door
+lands the device key on, so a switched role shows on the next listing with no
+restart.
+
+Once a producer is placed in a tribe, its line in `wild ingest announcements`
+ends with how long each source a table takes keeps its deliveries, from the
+same table the Elder words it from (`readings keeps its deliveries with no
+limit: nothing is removed because of its age.`, or `readings keeps each
+delivery 1 day at most; tabs keeps each delivery 30 days at most. Older
+deliveries are removed with everything they brought: …`, said once for all of
+a producer's sources). A limit left on a source no table takes any more
+is not listed. The limit is set in the tribe chat
+(the Elder's `connector_producer_retention`); a limit where none was, or a shorter one,
+waits for your yes in the inbox, a longer one or none is set at once. Asking
+for another limit, or setting one, withdraws the question still waiting, and a
+yes to a question whose limit changed since it was asked sets nothing.
+
+Beside its deliveries, each source keeps its last 3 items, as they arrived and
+before any table took them, so a changed flow can be tried on real items before
+you say yes to it. A newer item overwrites the oldest, and they are removed with
+the source, and with the deliveries a limit or an erasure removes. These items
+can carry personal data. They live in the tribe's folder
+(`intake/samples/<source>.jsonl`).
+
+`pause` and `resume` take a connection as `revoke` does; `--producer <name>`
+alone pauses or resumes every connection of that producer, in every tribe it
+delivers into. A paused connection's batches are answered `503 paused`, so the
+producer keeps them and sends them again once resumed — no new pairing, no new
+key. A connection's own resume leaves it paused while its whole producer is, and
+says so. A revoked connection stays revoked. The Elder's `connector_producer_pause` and the
+producer detail's Pausieren / Fortsetzen do the same.
+
+`revoke` takes the connection as `wild ingest announcements` lists it; the
+producer is found from it. If more than one producer has a connection of that id,
+it says which and changes nothing: add `--producer <name>` to pick one. The connection's next batch is answered 401 and it can no longer
+deliver; what it already delivered stays. A connection that is activated but has
+not fetched its key yet is cut off too: it is never handed one, and the listing
+reads it as revoked. Revoking an unknown or an
+already-revoked connection says so and changes nothing. The Elder does the same
+through `connector_producer_revoke`, staged for your yes: like the others, `revoke` is
+your act, never an agent's key.
+
+`erase` takes the connection the same way (and `--producer` when its id is
+ambiguous) and removes everything that connection delivered: its records in every table,
+its waiting and failed deliveries, and its receipts, each recorded as expired
+so nothing replays it (ADR-0365 D10). It cannot be undone, and it reaches the
+tribe's tables, queue, receipts and files, and its history: no earlier date
+(`known_at`) shows the erased records again, and restoring an older backup
+does not bring them back (#10412). That holds while the tribe's
+`erasure_removes_history` setting is on, as every tribe is born with it (the
+operator switches it on the tribe's settings card, which the Elder opens);
+with it off the history still holds them, and the answer says which. On the
+lake plane the erasure takes the values out of every earlier date whatever the
+setting: what arrived since the tribe began encrypting its deliveries is
+destroyed (its key is destroyed: neither the tribe's data nor its history
+shows it again), what arrived before — and what lies in a field people may
+also edit — is blanked, not destroyed, as the tribe's files still hold it,
+and the answer says which (#11073). A backup of the tribe taken before the
+erasure still holds those values, so `wild tribe restore` refuses it and
+names the erasure's date; a backup taken after it restores (#11837). A conversation with the Elder that
+already quoted a value keeps its own copy. The answer after the
+act cannot see the history part: should it not go through, the tribe's inbox
+says so. A removal for age
+follows the same setting. Without `--yes`
+it says what kinds of data an erasure removes, without counting them, and
+changes nothing. Unlike the other verbs it needs the running
+daemon, which holds the connection's receipts; the tribe comes from the
+announcements, or from `--tribe` when the announcement is gone. It answers
+how many deliveries and records went, and what stayed and why — a delivery
+whose records the store keeps (a table that also holds your own fields) stays
+whole, and the others go on. While a source the connection feeds is being read,
+it erases nothing and asks you to try again; when the tribe's model cannot
+be read, it erases nothing either, because without the model no table can be
+told apart. The connection's key stays; `revoke`
+it to stop new deliveries. The Elder does the same through
+`connector_producer_erase_device`, staged for your yes.
+
+`activate` and `reject` are operator acts: your own session releases them,
+never an agent's key (ADR-0365 D12). No act asks for Touch ID or polkit. The
+same question waits in your inbox: „Liefern lassen", or the tribe's name when
+the question could not name one, or „Ablehnen". Whichever you answer first
+closes the other.
+
+### Channel bindings (`wild channel` — ADR-0167, ADR-0276 D1)
+
+A customer channel routes to a tribe through `system/channels.yaml`; an unbound
+`(channel, tribe)` makes the inbound webhook answer 503. `wild channel bind` is
+the guided writer — it upserts one binding idempotently (preserving any other
+row's outbound routing fields), so an operator wires a channel without
+hand-editing YAML. (The dashboard/Elder path is the `wild.system.channel.bind`
+governed action; the in-chat `channel_bind` tool follows with the guided
+onboarding escalation.)
+
+`wild channel block` / `wild channel unblock` mutate the per-channel correlation
+ledger at `<profile_root>/tribes/<tribe>/channels/<channel>/correlations.jsonl`.
+They only work on senders that already have a persisted correlation record
+(typically created by a `persist_record` unknown-sender policy); a blocked
+sender is refused at the inbound stamp layer before a turn is composed.
+
+```bash
+wild channel ls                                             # print the current bindings
+wild channel bind whapi --tribe acme \
+  --inbound-secret whapi-webhook --on-unknown-sender mint_ephemeral
+wild channel bind whapi --tribe acme --route chief          # non-customer inbound route
+wild channel block whapi --chat-id 491234@s.whatsapp.net --tribe acme
+wild channel unblock whapi --chat-id 491234@s.whatsapp.net --tribe acme
+```
+
+### Generative UI (ADR-0063 §6 — `wild ui`)
+
+The M3 proof-of-concept for the Tier-1 UI-descriptor vocabulary
+(`common::ui_descriptor`): it auto-builds a declarative descriptor for a
+type, fetches the data live over the same `wild data` path, and renders it
+in the terminal — exercising the **descriptor → fetch → render** loop the
+chief will eventually drive (`chief_reply_to_user`). Operator-only (no
+ADR-0050 identity yet).
+
+```bash
+wild ui invoice --tribe acme                 # render a type as a table (title · row-count · table)
+wild ui invoice --tribe acme --columns id,amount,status   # declare the bound columns
+wild ui invoice --tribe acme --filter status=open --sort amount:desc   # bound filter + sort (source.filter/sort)
+wild ui invoice --tribe acme --chart status,amount         # add a chart block (group by status, sum amount)
+wild ui invoice --tribe acme --descriptor    # dump the JSON wire-format the chief would emit
+wild ui --from reply.json --tribe acme       # render a descriptor emitted elsewhere (e.g. a chief reply); `-` = stdin
+```
+
+### Tools (tool-provider dev / debug)
+
+Operator/dev surface over the host's aggregated tool-provider catalog —
+the **same** dispatch path a worker's `wild:tools/invoke` takes, minus
+the LLM loop. Use it to smoke-test a freshly-added provider plugin (Rust
+or a jco/ComponentizeJS JS component) without standing up a tribe +
+worker. NB: this is not how an *agent* calls a tool — see
+`docs/plugin-developer-guide.md` § "Who invokes a provider tool".
+
+```bash
+wild tool ls                                    # flattened catalog: name · provider · description
+wild tool ls --json
+wild tool invoke md-render '{"markdown":"# Hi"}'   # dispatch by name, print the result
+wild tool invoke slugify '{"text":"Héllo Wörld"}' --json
+wild tool invoke telegram-send '{…}' --tribe vertrieb   # run as that tribe would; default `root`,
+                                                #   the operator's own call (ADR-0373 D3)
+```
+
+A blob key in the arguments (`root/uploads/x.pdf`) must be an uploaded
+document's key; no `wild` verb uploads one — drop the file into the tribe's chat
+in the dashboard, then read its key with `wild content ls <tribe>`.
+
+### Diagnostics / control plane (ADR-0035 §3.3.3)
+
+```bash
+wild metrics                             # host metrics in one round-trip
+wild metrics --json                      # same shape as Response::Metrics, for jq
+wild debug inventory                     # dump daemon-internal state (host id, workloads, WIT)
+wild debug vitals                        # every tribe's ADR-0136 health rows WITH the detail
+                                         #   line + remediation `/readyz` folds away; no token,
+                                         #   no REST listener needed (see docs/observability.md)
+wild reconcile                           # force the reconcile loop to tick now (all tribes)
+wild reconcile <tribe>                   # scope the tick to one tribe
+wild log-level <directive>               # live-set the daemon log filter
+                                         #   (e.g. `info`, `wild_host=debug`)
+```
+
+There is no `wild events` / `wild logs` verb — the event firehose is
+the NATS bus + the daemon log + the `wild watch` Bus pane (see
+`docs/observability.md`); replayable records read
+via `wild traces list` / `wild loops list` below.
+
+### Elder prompt introspection (`wild elder` — #3503)
+
+```bash
+wild elder dump-prompt --surface tribe-elder           # per-tribe operator chat,
+                                                       #   static L0 (--dashboard adds
+                                                       #   the dashboard fragment)
+wild elder dump-prompt --surface tribe-elder \
+    --posture modelling                                # ADR-0307: render the lane's posture
+                                                       #   fences for one posture (evaluating|
+                                                       #   modelling|intake|operating|
+                                                       #   commissioning|unclear; default
+                                                       #   unclear = every block)
+wild elder dump-prompt --surface tribe-elder-root      # same, root chat persona
+wild elder dump-prompt --surface chief                 # pointer: the tribe's autonomous
+                                                       #   chief cycle (in-guest)
+```
+
+Prints the exact system prompt a surface hands the model — the
+authoritative replacement for the canary-emoji "which prompt file is
+live" hack. `tribe-elder`[`-root`] calls the SAME composer the live path
+calls (`wild_shared::domain_elder_prompt`), so the dump is byte-identical
+to the live static (L0) composition; per-turn dynamic grounding sections
+are named in the stderr banner, never faked. **That one surface covers
+delegation too** — since ADR-0316 G2 the MCP `elder_ask` family rides this
+lane, so the `runner` and `mcp` surfaces (and their `--mode` flag) are
+gone with the second prompt world they dumped. `--surface chief` (the
+tribe's autonomous cycle, composed in the chief wasm guest) prints an
+honest pointer to
+`assets/prompts/chief-default/cycle.md` rather than a wrong answer.
+**The chief is not an operator-chat surface.** Since #3703 every operator
+door — the inline REPL, `wild chat ask`, REST and the dashboard — publishes
+to the ADR-0111 operator-chat subject `wild.{tribe}.operator.chat.*` and is
+answered by the tribe's Elder (`--surface tribe-elder`[`-root`]) — a subject
+the chief deliberately does not consume, since it reads
+`wild.{tribe}.user.*.message`. So
+`wild chat --tribe <slug>` is a door onto that tribe's LIVE model: its
+Elder holds the `ddd_declare_*` commit lane. The
+banner goes to stderr, so `… --surface tribe-elder > out.md` captures only
+the prompt body. See `docs/prompt-layers.md` for the
+surface→files map.
+
+### Spec authoring + change triage (ADR-0034)
+
+```bash
+# Validate hand-written specs/briefs — read-only, no daemon/NATS needed
+wild spec validate <tribe>               # checks tribes/<tribe>/{specs,briefs}/;
+                                         # exit 0 clean, 1 on any issue
+
+# Re-run the pre-activation spec review (ADR-0043) — needs a running daemon;
+# an LLM turn, so it may take a minute. The review gate's refusal names it.
+wild spec review <tribe>                 # counts by severity, next step, findings file
+
+# Triage pending change folders
+wild change list <tribe>                         # pending changes for a tribe
+wild change show <tribe> <change-id>             # proposal + parsed deltas
+wild change accept <tribe> <change-id>           # merge deltas into live specs/briefs,
+                                                 # archive; hot-reloads an Active tribe
+wild change reject <tribe> <change-id> --reason "…"   # archive with -rejected suffix
+wild change reconcile [--tribe <slug>] [--dry-run]    # auto-accept low-risk brief-only
+                                                 # changes past their 24h grace window
+```
+
+There is no `wild change propose`: the operator proposes a change with
+**Propose a change** in the Dashboard's Changes view (it posts to
+`POST /api/v1/tribes/{tribe}/changes`). The proposal waits in the same list as
+every other change until it is accepted. The door names the proposal by the
+access that sent it: the operator's own reads as the operator, any other key
+as that key. It always files at risk `high`, so nothing it files applies by
+itself; a body naming a `change_id` or a `risk` is refused.
+
+A change that touches **data** (a type's fields, a configuration record, a
+record to retire) is written by the running Wild, never by the `wild`
+command itself — on either data plane. `wild change accept` and `wild change
+reconcile` hand that part to the running daemon. With no Wild running,
+`accept` refuses such a change before anything is written, and the change
+stays waiting: *"Wild is not running, so this change was not accepted … Start
+Wild (`wild up`), then accept it again — here, in the dashboard, or by asking
+the Elder."* `reconcile` leaves it waiting and names it among its errors. A
+change that touches only specs and briefs still merges with no Wild running.
+A `wild` newer than the running Wild may send a command the daemon does not
+know yet; the daemon then refuses it by name (`unknown variant
+`record-retire``) and the change stays waiting — restart Wild with the new
+binary (`wild down`, `wild up`) and accept again.
+
+### Published apps (ADR-0154)
+
+```bash
+# Validate an operator-published end-user app spec — read-only, no daemon/NATS.
+# Parses apps/<id>.yaml through the closed 6-view schema, prints a plain-language
+# summary (pages · views · bindings) and any structural problems.
+wild app validate <path>                 # e.g. tribes/<tribe>/apps/liquidity-cockpit.yaml
+                                         # exit 0 clean, 1 on any issue
+
+# Serve the end-user portal (ADR-0154 D3). Brings up `wild-appd` in the
+# foreground in front of a running tribe: it serves the app shell + forwards
+# every read to hostd's private CUSTOMER listener with the end-user's own bearer
+# (appd holds no token, reads no backend). Announced on the LAN over mDNS as
+# http://<name>.local:<port> (Stage-1 URL story). Ctrl-C stops it.
+wild app serve [--bind 0.0.0.0:8091] [--upstream http://127.0.0.1:8090] [--hostname wild]
+wild app status                          # the portal's honest plain-language status
+wild app rollback <app> <version>        # restore a spec from apps/<app>/history/
+wild app template <name>                 # apply a template to draft a spec
+                                         # (published URL + whether it reaches the tribe)
+```
+
+```bash
+# Install a DOMAIN PACKAGE (ADR-0156 — a declarations-only bundle: ontology
+# with reading marks + app templates + unbound sample sources; never code).
+# Without --yes: prints the D4 preview (types, actions in the author's words,
+# the trust sentence, waiting-for-your-connection sources) and writes NOTHING.
+# A name collision with a local / other-package type is REFUSED by name (the
+# rename is yours); a prior install of the SAME package is the upgrade path —
+# the pin-seam arbiter preserves your `local`-marked field edits.
+# --with-example-data (OQ6.3, opt-in): if the package carries example rows, also
+# ingest them as real records under a distinct `package-sample` source you can
+# delete later. Off by default — your tribe stays clean until you opt in.
+wild package install <dir> --tribe <slug> [--yes] [--with-example-data]
+
+# ADR-0156 PR6 — the SUPPLY side: export a tribe's live ontology as a sanitized
+# domain package (the inverse of install). Reads the ontology daemon-side
+# (decompiles it back to a `model.yaml`), DISARMS every source to an `unbound`
+# template (blanks the locator + secret handle, keeps the shape, moves the
+# cadence to a hint), and writes a package directory an importer installs. A
+# READ of the tribe — it mutates nothing. Refuses a re-export of declarations
+# installed from ANOTHER package (naming it). Refuses a non-empty out-dir
+# without --force. --name defaults to the tribe slug, --version to 0.1.0.
+# --with-example-data (OQ6.3, opt-in): also ship <=50 example rows per type under
+# data/<slug>.jsonl so an importer sees what a filled record looks like. Every
+# `sensitive`/`internal` field is stripped first; a type whose REQUIRED field is
+# sensitive ships no rows (a redacted sample could not re-ingest). Off by default.
+# --withhold-procedure (ADR-0202 OQ3): ship a Procedure-backed Function's
+# requirement WITHOUT its basis. By default the basis travels (D7's method,
+# fitted parameters and source), so the recipient can re-check and re-weight it;
+# with this flag the package names what it needs and records that YOU chose to
+# keep the method — the recipient sees a decision, not a missing file. Nothing
+# infers this: no read of the method or its complexity picks it for you.
+wild package export <out-dir> --tribe <slug> [--name <n>] [--version <v>] [--force] [--with-example-data] [--withhold-procedure]
+
+# ADR-0191 D3 — pack a package DIRECTORY into the canonical `.tar.gz` you publish
+# to the marketplace (`xtask marketplace-domain-publish`). Byte-identical to the
+# dashboard download and accepted by the daemon's reader; a raw `tar` is fragile
+# (macOS AppleDouble `._` entries alone break it). See `docs/domain-packages.md`.
+wild package pack <dir> --out <file.tar.gz>
+```
+
+`wild app serve` needs hostd's customer listener bound — bring both up together
+with `wild up --customer-http 127.0.0.1:8090 --with-appd` (foreground; the portal
+is co-supervised and stops with `wild up`). The detached form
+`wild up --daemon --with-appd` brings the portal up as a PID-file sidecar that
+survives the launcher and is reaped by `wild down` — this is the packaged app's
+autostart path on macOS AND Windows (ADR-0120 D3, ADR-0256 A4), so a published
+app's URL resolves with no `wild app serve` step.
+
+#### Where the portal runs — and the three things called "embedded"
+
+The word means three different things around apps, and only the last is a
+deployment choice:
+
+1. **The in-cockpit preview.** `wild app publish` is not needed to look at an
+   app: the dashboard mounts the SAME `wild-view` renderer over its OPERATOR
+   transport (`app_pane.rs`), with full unfiltered visibility and draft specs.
+   No `wild-appd`, no customer token, nothing on the LAN. This is what the
+   operator sees while Elder is still editing the app.
+2. **An app inside someone else's page.** `wild-appd` serves
+   `/embed/{app}/{view}` chrome-less, with `frame-ancestors` taken from the
+   per-app `.embed` sidecar — default DENY until the operator allowlists a host
+   (ADR-0154 D6).
+3. **Who owns the portal's lifetime.** `wild-appd` is always its own process,
+   on every platform. The packaged app *owns* it (`--with-appd` above, daemon
+   supervised, restarted on death); a headless server install runs
+   `wild-appd serve` on its own in front of a local `wild-hostd`. It is
+   deliberately NOT hosted inside the dashboard process, even though it is a
+   library and would be a few lines: the portal is the one LAN-exposed door
+   (ADR-0154 D3) and the dashboard holds the operator token, and a customer
+   door that closes when the operator closes their laptop is not a door.
+
+On Windows the packaged app takes path 3 exactly as macOS does; a headless
+Windows install has no login/service story yet, so `wild-appd serve` is started
+by hand or by the operator's own Scheduled Task.
+
+**First launch on Windows raises the Defender Firewall dialog.** The portal
+binds `0.0.0.0:8091` — that is the point of it — and Windows asks before letting
+an unsigned program accept connections from the network. Answer Allow for the
+networks the portal should serve (Private, normally). The rule is keyed on the
+program PATH, so an install into a new directory asks again. It is not something
+the installer can do for you: writing a firewall rule needs an administrator,
+and the install path is deliberately elevation-free (ADR-0262 D8). Say no and
+`wild app status` still reports the portal as up — it is; it is just unreachable
+from other machines, which is the one thing a customer door is for.
+
+**The packaged app announces it first.** The first-run wizard shows a
+Windows-only screen before the AI choice that names both OS dialogs — the
+firewall one above and the SmartScreen notice — in operator language, with the
+button to press. Nothing to configure; it exists because a security dialog
+nobody mentioned is a worse first minute than the dialog itself. From the CLI
+there is no such screen, which is why the paragraph above says the same thing
+here.
+
+The end-user UI is the `wild-portal` WASM bundle (ADR-0154 PR3c). Build it with
+`cargo run -p xtask -- portal build` (a `dx build --platform web`); point
+`wild-appd` at the output via `WILD_APPD_ASSETS=<dir>` (else `wild-appd` serves an
+honest placeholder shell). End users open `http://<name>.local:<port>/apps/<tribe>/<app>#token=<their-token>`;
+`?locale=de-DE` drives number grouping. `cargo run -p xtask -- portal serve` runs a
+browser dev loop.
+
+### Idea search (ADR-0026 — in-process, no daemon)
+
+```bash
+wild search query "<text>" [--limit 10]  # ranked hits across the three search tiers
+wild search reindex                      # rebuild the Tier-3 inverted index from
+                                         # tribes/*/blueprint.md (idempotent)
+```
+
+### Licence (`wild licence` — ADR-0290, no daemon)
+
+What this installation is, and the document that raises what it may
+do. Both halves of one conversation: you read your identity out to
+order a licence, and you put the licence back in when it arrives.
+
+```bash
+wild licence show                  # the install identity, the limits in force,
+                                   # and — if a licence is present but not
+                                   # counting — the reason why
+wild licence install ./acme.json   # verify a licence and put it in place
+```
+
+An installation with no licence is not an installation with nothing: it
+holds up to `FREE_MAX_TRIBES` tribes and may open the engines in
+`FREE_ENGINES` (`crates/wild-licence/src/lib.rs` — the only place those
+numbers exist). A licence RAISES those; it does not switch them on.
+
+`show` prints BOTH tribe ceilings, because they are different limits:
+the licence bounds how many tribes are **held**, `WILD_TRIBE_MAX_ACTIVE`
+bounds how many **run at once**. Someone queueing at five with a licence
+for ten is looking at the second one. They are deliberately not merged —
+a licence must not silently raise an operating limit its operator chose.
+
+`install` verifies **before** it writes: the signature, that the licence
+names THIS installation, and that today is inside its window. A licence
+failing any of the three is refused with the reason and nothing in the
+profile changes — including a licence already in place, so a mistyped
+renewal cannot destroy a working one. It takes effect at the next
+`wild up`.
+
+The identity is created the first time the installation starts, and
+`show` reports its absence rather than minting one: asking who you are
+must not be what decides it.
+
+### Forge (status + briefs + crate allowlist + build ledger)
+
+```bash
+# Is the build service up, and what did the last build do?
+# Answers the question a stalled build actually raises — "the service, or my
+# component?" — and names the retry rather than taking it. Reads only.
+# The build-service line is what the daemon recorded (the same state
+# `wild doctor` shows); "cannot say" when the daemon is not running, which
+# is never the same answer as "reachable".
+wild forge status
+wild forge status --json
+
+# Assemble the Forge brief for a tribe's capability
+wild forge brief <tribe> <capability>            # render to stdout
+wild forge brief <tribe> <capability> --save ./brief.md
+
+# Wild-wide extra-crate allowlist (operator-managed, install-wide).
+# Config file: <profile_root>/forge/allowlist.toml (NOT a WILD_* env var).
+wild forge allowlist show                # effective allowlist (baseline + extras)
+                                         # + derived sandbox-image status
+wild forge allowlist sync                # bake the operator extras into a derived
+                                         # sandbox image so they resolve in the
+                                         # network=none build; no-op when no extras
+
+# Per-build accountability rollup for one Wright forge session
+# (ADR-0298 D5): LLM turns / tokens / seconds / cost, build attempts
+# per status, workbench invokes — joined on the session build id.
+# Cost says "unpriced" when the adapter has no per-call price on
+# record (a subscription CLI or local model is NOT "free", ADR-0286 A2).
+wild forge ledger <build-id>             # tribe discovered from the session's
+                                         # progress.jsonl, then the audit logs
+wild forge ledger <build-id> --tribe acme
+wild forge ledger <build-id> --json      # one JSON object (cost_usd: null = unpriced)
+```
+
+### Skills (user-added)
+
+```bash
+wild skill add <path.md> [--force]       # validate + import a Skill MD into <profile_root>/skills/
+wild skill update <path.md>              # replace an existing imported skill
+wild skill list                          # (alias: ls) print every imported slug
+wild skill remove <slug>                 # (alias: rm) delete an imported skill
+```
+
+### History / telemetry
+
+```bash
+# Episodic traces (one row per chief Reflect; ADR-0005)
+wild traces list [--tribe <slug>] [--limit 20] [--json]    # newest first
+wild traces export [--tribe <slug>] [--limit 10000] [--out ./corpus.jsonl]
+                                         # JSONL training records (SFT/DPO corpus)
+
+# Which expertise the assistant chose for each of your questions — a
+# DIFFERENT store from `traces export` above (that one dumps the chief's
+# episodic reflections; this one the per-turn chat record: the ranking the
+# activation tier scored, the skill it settled on after the second look, the
+# posture). ADR-0345 D1, #8322.
+wild traces chat-export                  # writes wild-skill-choices.jsonl beside
+                                         # the profile and prints what is in it
+wild traces chat-export --with-questions # …including the wording of your own
+                                         # questions. OFF by default: the ranking
+                                         # and the winner are scoreable without
+                                         # it, and a question you typed carries
+                                         # your customers' names and your amounts.
+                                         # Credential redaction ran before disk —
+                                         # it removes secrets, not a business
+                                         # sentence. Read the file before sending.
+wild traces chat-export [--tribe <slug>] [--limit 10000] [--out <path>] [--stdout]
+
+# Loop telemetry (per-turn / per-tool / per-budget signals; ADR-0027)
+wild loops list [--tribe <slug>] [--limit 50] \
+    [--since 24h] [--type loop.tool_call] [--json]   # --since: 30m|24h|7d|30d
+
+# F3 judge rollup (per-tribe outcome distribution, mean score,
+# iterate rate — the condensed read for ADR-0057 graduation evidence)
+wild loops judge [--tribe <slug>] [--since 7d] [--json]
+
+# Content Flow — captured documents + enrichment results (ADR-0171 Phase 1.9)
+wild content ls [--days 7] [--json]                  # active tribe, last 7 days
+wild content ls <tribe> [--days 7] [--json]          # specific tribe
+wild content show <tribe> <blob_ref> [--json]        # provenance + enrichment detail
+wild content rerun <tribe> <blob_ref>                # re-queue enrichment
+wild content list <tribe>                # captured documents for one tribe
+wild content confirm <...>               # documents paused at `does: review` —
+                                         # list, inspect and resolve them
+
+# Flows — compiled DDD spec + runtime run state (ADR-0185 PR #2)
+wild flows ls [<tribe>] [--json]                     # name, stages, status, last run + outcome (✓/✗), next run
+wild flows show <flow-slug> [--tribe <tribe>] [--json]  # spec stages/edges + recent runs (each with its outcome)
+wild flows feed <flow-slug> [--tribe <tribe>] [--item <json>] [--type-slug <slug>]  # hand an item into a flow
+wild flows try <flow-slug> [--tribe <tribe>] (--file <path> [--row <n>] | --record <type>/<key>) [--json]  # what the flow would do with it — nothing stored, sent or filed
+wild flows run retry <run-id> [--tribe <tribe>]      # re-trigger a failed run (content or connector flow)
+wild flows list <tribe>                  # Flows for one tribe
+
+# Metered LLM-call usage (ADR-0135 Layer B)
+wild llm usage                           # by model, last 30 days, all tribes
+wild llm usage --tribe acme              # scope to one tribe
+wild llm usage --since 7d                # last 7 days
+wild llm usage --dimension caller        # rollup by caller/strategy/adapter/model/tribe
+wild llm usage --json                    # NDJSON buckets + total line
+```
+
+### Running without a login session (ADR-0288 D1)
+
+```bash
+wild service status                      # is Wild registered to start on its own?
+wild service install                     # register it (needs privilege — sudo on Linux/macOS, an elevated terminal on Windows)
+wild service remove                      # unregister; the profile is untouched
+```
+
+By default Wild runs while you run it. `wild service install` registers
+the daemon with the platform's own service manager so a tribe keeps
+working when nobody is logged in — under **your own account**, with the
+profile staying exactly where it is (ADR-0288 D8). Opt-in, and undone by
+one command.
+
+Wired on all three: a systemd system unit on Linux, a system-domain
+LaunchDaemon under your own account on macOS, and on Windows a scheduled
+task that starts at boot (ADR-0288 D9). Where an arm cannot ask — a
+platform with no service manager story — `status` says so rather than
+guessing, because "not registered" reads as an invitation to install
+something it could not install. The operator-facing offer this verb backs
+is ADR-0288 D7's, and it lives in the Dashboard.
+
+On Windows, `install` needs an **elevated** terminal: a task that starts
+at boot is a machine-level registration and Windows refuses one to a
+normal caller. It then asks for your **account password**, and Windows
+asks for it directly — Wild never sees, holds or passes it. If you sign
+in with a PIN or Windows Hello and do not know that password, this is the
+step where you will need it (ADR-0288 D8).
+
+On macOS, `install` refuses while the per-user login agent
+(`dist/install/install-launchd.sh`) is registered, and says how to stand
+it down — the two registrations both start `wild-hostd`, and launchd
+scopes them to different domains, so nothing else would stop two daemons
+coming up against one profile.
+
+### Secrets (`wild:secrets`)
+
+```bash
+wild secret add <name> [--from-stdin]    # store a value in the OS keychain
+wild secret list                         # every name Wild can resolve — indexed or
+                                         # declared — with an honest state; no values
+wild secret has <name>                   # is it resolvable right now? exit 0/1, never the value
+wild secret show <name> --confirm        # reveal a value (explicit opt-in; the value alone on stdout)
+wild secret remove <name>                # delete a stored secret
+wild secret rotate <name> [--from-stdin] # replace a value in place
+wild secret backend                      # show the active backend chain
+wild secret old-keychain                 # macOS: what Wild left in the old keychain
+wild secret grant <component> <name>     # read-access to one secret (Phase 6.4);
+                                         # the component must declare it
+wild secret grants [--component <c>]     # every grant in system/secret-grants.json
+wild secret revoke <component> [<name>]  # omit the name to drop every grant for it
+```
+
+Components read secrets via the `wild:secrets/store` WIT import; this
+CLI is the operator-side surface for managing the values. Design:
+[`docs/secrets.md`](secrets.md).
+
+`list` and `has` answer different questions and it matters which you ask.
+`list` enumerates the profile's secret index — name, holding backend, when it
+arrived, how — and the env backend is deliberately not enumerated, so a secret
+held ONLY in an environment variable is resolved by every real read and never
+appears in the table. `has <name>` asks the resolver chain by name instead:
+same chain a component's read resolves through, env included, no index
+involved. So `has` is the one to script against (`if wild secret has x; then`),
+and a "not present" from it names the chain it asked. When a backend the
+configured order names cannot be consulted at all, `has` says it cannot tell
+rather than reporting an absence — the value may be in the store nobody
+reached. Neither verb ever prints a value.
+
+`old-keychain` exists because ADR-0287 D1 moved the macOS store to the
+data-protection keychain and D2 migrated nothing, so everything written under
+the old API stays where it is — unreadable by the new build and invisible to
+`wild secret list`. It shows two groups and never confuses them: internal
+master keys, which open nothing and which `--remove` clears (taking each one's
+`.in-vault` stamp with it), and YOUR keys, which need
+`--remove --include-keys --confirm`. That asymmetry is the point — Wild can no
+longer read an old API key, but your keychain still can, so removing one
+destroys the only copy. Listing never raises a permission dialog: it reads
+attributes, not values.
+
+Removing does not raise one either, and the reason is the same one that used to
+make the door useless. `SecItemDelete` — the obvious call, and the one this
+first shipped with — answers `errSecInvalidOwnerEdit` for every legacy item, so
+`--remove` reported `Removed 0 of 5` against a real store and still exited 0.
+The path that works is the one `security(1)` takes: match for a *reference*
+(`load_refs`, never `load_data`, so no value is read and no dialog appears),
+then `SecKeychainItemDelete` on it. Removing none of what was named is now a
+command failure rather than a tally.
+
+### OAuth (ADR-0143)
+
+```bash
+wild oauth login <binding> [--tribe <tribe>]   # one-time sign-in for an authorization_code binding
+wild oauth grant <component-id> <binding>      # let a component call get-token for a binding
+wild oauth revoke <component-id> [<binding>]   # remove one or all grants for a component
+wild oauth grants [--component <id>] [--binding <name>]
+```
+
+`login` runs the one-time operator consent for an `authorization_code`
+binding declared in `system/oauth.yaml`: opens the provider's
+`authorize_url` (with PKCE + a random `state`), captures the redirect on a
+local loopback listener
+(`http://127.0.0.1:<redirect_port>/callback`), validates the returned
+`state`, exchanges the code for the initial access + refresh token, and
+stores the refresh token in the host token store. A missing or expired
+consent surfaces as a plain-language mailbox row naming this exact command.
+Client-credentials bindings need no login.
+
+`grant` / `revoke` / `grants` manage the per-component OAuth binding ACL
+(`system/oauth-grants.json`). A component must (a) declare the binding in
+its sidecar `oauth_bindings`, (b) be granted it by the operator, and (c)
+have a configured provider row in `system/oauth.yaml` before the host
+serves it a token via `wild:oauth/token::get-token`. Design:
+`docs/adr/0143-outbound-oauth-broker.md`.
+
+### Connector conformance probe
+
+```bash
+wild connector test <tribe> <source-slug>        # dry-run enumerate only
+wild connector test <tribe> <source-slug> --fetch-first   # also fetch the first item
+wild connector test <tribe> <source-slug> --sample        # also map a sample row (setup proof)
+wild connector test <tribe> <source-slug> --json   # compact JSON for jq
+```
+
+Read-only diagnostic for ONE declared intake source. Resolves the source
+from the tribe's `flow` records, checks credential readiness (secrets +
+OAuth), invokes the connector's `enumerate` verb, and optionally fetches
+the first item. `--sample` additionally decodes a sample row through the
+same probe the intake pipeline uses **and checks the columns it read
+against the ones the declaration maps from** — the verify-before-done
+completion proof (ADR-0152 D9): only a green probe WITH a successful
+sample means the source is truly set up. Nothing is ingested or
+persisted. Use it to prove a connector is reachable and correctly
+configured before scheduling intake or after rotating credentials.
+Returns success/failure, item count, first-item metadata, fault
+classification, and elapsed ms.
+
+`sample.status` is one of:
+
+| Status | Meaning |
+|---|---|
+| `ok` | decoded, and every declared column is present in the file |
+| `mismatch` | decoded, but declared columns are **missing** from the file — every file of this shape will be PARKED, not ingested. `missing_columns` names them. |
+| `skipped` | no in-process blob reader — a host limitation, not a source fault |
+| `failed` | the item could not be decoded at all; flips the whole report red |
+
+`mismatch` covers the gap the ADR-0108 cross-layer gate structurally
+cannot: that gate refuses a mapping reading an undeclared column, but it
+never sees the FILE, so a declaration that is internally consistent and
+drifted from the real header passes it, applies cleanly, and parks every
+file it reads. It is not `failed`, because a source may declare several
+shapes and one file match only one of them.
+
+### Provisioning (ADR-0146)
+
+```bash
+wild provisioning ls [--tribe <tribe>]              # list installable/remediable items
+wild provisioning invoke --tribe <tribe> --subject <subject>  # consent to install one item
+wild provisioning list <tribe>           # provisioning items for a tribe
+```
+
+Lists the unified provisioning surface: missing models, secrets, plugins,
+connectors, OAuth bindings, or binaries that the daemon needs before a
+capability works. `invoke` is the operator consent that starts the governed
+install/download; progress is reported back through the same vitals channel.
+Design: `docs/adr/0146-operator-provisioning-surface.md`.
+
+### MCP — attach a client
+
+```bash
+wild mcp                                 # stdio: the client spawns this; it tunnels to wild-hostd
+wild mcp --full-catalog                  # stdio, listing every tool instead of the core set
+wild mcp --transport http --bind <addr>  # HTTP transport (lean build defers to `wild up --mcp-http`)
+wild config mcp setup                    # print a Claude Desktop mcpServers snippet
+wild config mcp setup --full-catalog     # the same, starting `wild mcp --full-catalog`
+wild config mcp setup --agent [--tribe <t>]... [--name <n>]
+                                         # mint an outside agent's key + write its connection
+```
+
+`--agent` (ADR-0365 D12) is for an AI agent that builds a connector — Claude
+Code, Codex, OpenCode. It mints a key of its own (hashed at rest, `wild user rm <name>` takes it
+back) and never prints it: a terminal an agent runs the command in hands its
+output to the LLM. It writes the agent's **connection** — `/mcp` at the
+address of Wild's door for producers, the pin of that door's certificate, and
+the key — to `<profile>/system/ingest/pairings/agents/<name>.json`, readable
+by you alone, and prints that path. So the door must be open (`wild ingest
+listen on`, `--network` for an agent on another computer or in a VM); a closed
+door, or one whose address on the network is not known, is refused before a
+key is made. On the agent's computer the file lies in
+`~/.wild-kit/pairings/agents/<name>.json`, copied there or pasted into
+`wild-kit paste-agent <name>` in a terminal of your own, and the agent's MCP
+client starts `wild-kit mcp <name>`, which pins the certificate and sends the
+key ([`wild-kit.md`](wild-kit.md#connect-the-agent-to-wild--optional-and-worth-it) § Connect the agent to Wild). The
+key reaches only the agent surface: `intake_validate_batch`, `ddd_propose`, the
+schema of the tribes named with `--tribe` (none named: every tribe), the
+model declarations, the producer contract and the `wild.build_a_connector`
+prompt. It reads no record, and whatever it proposes waits for your yes.
+The tribes are chosen here, on the command line, by you (ADR-0365 D12).
+
+`wild mcp` hosts nothing itself — since ADR-0036 G.3 it pipes stdin/stdout
+through the daemon's control socket, so the daemon must be up. `setup`
+renders the **Claude Desktop** shape today; the payload it carries
+(binary path, `--profile <name> mcp`, `WILD_HOME`) is what every other
+MCP client needs too — only the wrapper differs (Claude Code takes it via
+`claude mcp add`, Cursor reads `~/.cursor/mcp.json`, Codex wants TOML).
+
+A client is shown the core tools and finds the rest with `elder_tool_search`
+(`WILD_TOOL_TAIL_HIDDEN`, ADR-0067 Phase 4c). `--full-catalog` shows ONE
+connection every tool its door admits — for a client that loads tool
+schemas on demand by itself, like Claude Code; every other connection keeps
+the core set. It changes what is listed, never what may be called.
+`setup --full-catalog` writes the flag into the snippet (not with `--agent`).
+
+### Bearer token (REST + MCP)
+
+```bash
+wild config token rotate                 # rotate the shared bearer token (system/token, mode 0600)
+wild config token show                   # print the token file path + mode (bytes redacted)
+```
+
+The bearer token in `<profile>/system/token` is **transport-neutral** —
+the REST (`wild up --rest-http`) and MCP HTTP transports resolve the
+same secret. It is the single all-powerful operator bearer; scoped,
+named access is `wild user` (below).
+
+### Named users (ADR-0115)
+
+```bash
+wild user add <id> --operator             # named operator: full surface, all tribes
+wild user add <id> --tribe acme --tribe eu  # scoped user: role editor, only these tribes
+wild user add <id> --tribe acme --role viewer  # read-only in a tribe
+wild user add <id> --customer --tribe acme  # ADR-0154 "invite user": an app end-user (customer-mode, viewer by default; use --role editor for write-effect apps)
+wild user add <id> --client --tribe acme   # a program on its own key (a bot, a script): stages a call that needs a yes, never gives it — the call waits for a person's release in the Inbox
+wild user add <id> --operator --attr language=de-DE  # descriptive preference(s); repeatable
+wild user add <id> --tribe acme --group finance  # a read group from the start; repeatable
+wild user edit <id> --group finance --in acme     # give a read group in tribe acme — for this person only
+wild user edit <id> --remove-group finance --in acme  # take it away in acme
+wild user edit <id> --remove-group finance        # take it away everywhere
+wild user ls                              # id · role · tribes · groups · token fingerprint (never the secret)
+wild user rotate <id>                     # new token (prints once); old one dies immediately
+wild user rm <id>                         # revoke (effective without a daemon restart)
+wild user attr <id> --attr language=de-DE --unset timezone  # change an existing user's preferences (no args = show)
+```
+
+Manages the per-user identity map `<profile>/system/tokens.toml`
+(`[[user]]` token → role + tribes + groups + attributes). `--attr
+key=value` (repeatable, ≤16 pairs, values ≤256 chars, no control
+characters) attaches DESCRIPTIVE preferences — `language`, `timezone`,
+`tone`, … — an open set the chat reads to adapt (e.g. the
+Elder answers in the user's declared language); attributes are never
+authorization (roles/tribes/groups stay the gated fields) and never
+SECRETS — they ride message headers and render into the chat prompt, so
+treat them as visible to every host-side consumer. Tokens are always
+**generated** (never caller-supplied) and stored **hashed**
+(`sha256:<hex>`) — `add`/`rotate` print the secret **once**; it cannot
+be recovered. A tribe-scoped user is confined to the listed tribes on
+the operator REST surface and denied the raw tool-dispatch plane; an
+operator is a named, auditable stand-in for the shared token. Edits
+take effect without a daemon restart. The FIRST `--operator` added on a
+profile becomes the person this machine's window, `wild chat`,
+`wild tool invoke` and `wild package install` act as
+(`system/dashboard-token`). `wild user rotate` of that person moves
+the door to the new token; after `wild user rm` of that person the doors
+stop — every call, reads included, at the CLI, REST and MCP doors alike.
+The CLI doors refuse with that person named; the HTTP doors (REST and MCP)
+answer with the generic refusal and name no one — until the next
+`--operator` takes them over — see `auth.md` § Connecting the native
+dashboard.
+
+**Read groups (ADR-0115 D8).** A type that lists `required_groups` opens
+only to a person in one of them — the role does not: an `admin` without
+the group is refused, and the refusal names the fix. `--group <g>`
+(repeatable, on `add` and `edit`) gives a group, `--remove-group <g>`
+takes one away. **A group is held per tribe:** it counts in the tribe
+`--in <tribe>` names (repeatable) and opens that tribe's group data to
+this person only — nobody else who holds the same group gains anything.
+`--in` defaults to a tribe-scoped user's own tribes and is required for a
+user who reaches every tribe. `--remove-group` with `--in` takes the
+group away in those tribes; without it, everywhere. `wild user ls` prints
+`groups in <tribe>: …` per tribe. A profile set up before groups were per
+tribe keeps working: its `groups = [...]` still count wherever the
+tribe's claim map (`<profile>/tribes/<slug>/claim-map.toml`, ADR-0050 V2
+§3) honours them, `ls` lists them as `groups in every tribe that honours
+them`, and a take in one tribe says so when such a group still counts
+elsewhere. Every check runs before anything is written: a refused
+`add --group` leaves no person behind. The Elder gives and takes a group
+the same way (`access_person_group_set`, administrators only; a give counts in
+the conversation's tribe unless another is named). A customer key takes
+no group; the first-run operator gets none.
+
+### Profiles / connection
+
+```bash
+wild profile list                        # list profiles; marks the active one
+wild profile new [name] …                # create one (auto-names when omitted).
+                                         # Does NOT switch the active profile —
+                                         # except when it is the FIRST, where
+                                         # there is nothing to switch away from
+                                         # and an unset pointer strands hostd
+wild profile load <name>                 # switch the active profile
+wild profile stop [name]                 # stop a profile's runtime
+wild profile delete <name> [--force]     # delete it (--force stops it first)
+```
+
+### Setup / dev
+
+```bash
+wild install-deps                        # pre-fetch every pinned native dep, in this order:
+                                         # nats-server, llama-server, models — into
+                                         # <wild_root>/bin and <wild_root>/lib. Every step runs even
+                                         # if an earlier one fails (they are independent),
+                                         # and the command exits non-zero listing whatever
+                                         # did not install. PDF rendering is NOT in this list
+                                         # (ADR-0251): it runs in the `pdf-parser` component,
+                                         # so there is no native library to fetch.
+```
+
+`--help` on every subcommand prints the canonical flag list.
+
+## Chat REPL cheatsheet
+
+`wild chat` (or bare `wild`) opens an inline conversational REPL —
+plain stdout, native scrollback, Cmd-C / Cmd-F all work. Single
+addressee per session; switch with `/elder` / `/tribe <id>`. Type
+your message, hit Enter, the assistant streams its reply inline.
+
+### Slash commands (chat REPL)
+
+| Slash | What |
+|---|---|
+| `/help`, `/?` | Show every command + one-line description |
+| `/exit`, `/quit`, `/q` | Leave the chat (Ctrl-D / EOF also works) |
+| `/welcome` | Re-print the welcome block |
+| `/elder` | Switch addressee to Elder (root system tribe) |
+| `/tribe <id>` | Switch addressee to a tribe |
+| `/tribes` | Snapshot list of registered tribes (KV bucket) |
+| `/health` | Latest boot-health report |
+| `/activity [N]` / `/activity follow` | N most-recent operator events / live-tail |
+| `/bus [N]` / `/bus follow [pattern]` | N most-recent NATS msgs / live-tail (Ctrl-C exits follow) |
+| `/blueprint show` | Read-only inline blueprint print |
+| `/blueprint edit` | Suspend → `$EDITOR` → write back → reboot trigger |
+| `/blueprint reboot` | Publish a Reboot trigger without changing content |
+| `/diff <key>` | Unified `git diff`-style diff between the two latest revisions |
+| `/upload <path>` | Upload a local file to the active tribe |
+| `/copy` | Copy the last reply to the system clipboard |
+| `/save <path>` | Write the session transcript as Markdown |
+| `/!shell-cmd` | Run a shell command without leaving the chat |
+
+## Watch console cheatsheet
+
+`wild watch` is the full-screen monitoring dashboard — five panes
+(Activity, Tribes, Inbox, Bus, Forge), no input field, no chat surface. Operators
+typically run it in a second terminal tab next to `wild chat`.
+
+| Key | What |
+|---|---|
+| `Tab` | Cycle focus through Activity → Tribes → Inbox → Bus → Forge |
+| `F2`–`F6` | Jump focus directly (Activity · Tribes · Bus · Inbox · Forge) |
+| `PgUp` / `PgDn` | Scroll the focused pane |
+| `Ctrl-Home` / `Ctrl-End` | Jump to top / tail of focused pane |
+| `↑` / `↓` | Move Tribes cursor (Activity / Bus: scroll one row) |
+| `q` / `Esc` / `Ctrl-C` | Quit, restoring the terminal |
+
+**The Inbox pane's tag.** An open decision row is listed with its rule key
+as a short tag (`armed.tribe.start`, `schedule.alarm`), then its tribe, then
+its summary. The tag is a FILTER key for someone who reads keys — this is the
+monitoring console — so it stays the key. The summary beside it is the
+operator's line: the same line the inbox and the attention feed show the row
+by (its own words, else its rule's sentence, else „no description yet" with
+the key as a reference, #9323).
+
+## When to use which
+
+A few worked examples:
+
+- **"Add an LLM adapter for the team."** → CLI.
+  `wild config llm add --kind component --slug openrouter --id team-or`
+  runs in your provisioning script (`--kind component` requires the
+  backing plugin `--slug`; a freshly added component adapter wires at
+  the next daemon boot). Both `wild watch`'s Activity pane and
+  `wild chat`'s `/activity follow` show the config-change event.
+
+- **"Talk to a tribe about its current findings."** → chat REPL.
+  `wild chat --tribe q3-sales`, type. Multi-turn, references the
+  conversation history, supports `/save` for archiving.
+
+- **"CI watches the bootstrap lock."** → CLI.
+  `wild bootstrap list --json | jq .`
+
+- **"Inspect why a tribe is stuck."** → watch console for live look,
+  CLI for scripting. `wild watch` shows lifecycle events + heartbeat
+  freshness across all tribes; `wild metrics --json` is the
+  scriptable equivalent for an alert.
+
+- **"Approve a forge-built component-type."** → CLI verb.
+  `wild component-type approve <name>` works from a script and from
+  the chat shell via `/!wild component-type approve <name>`.
+
+## What about `wild chat <subcommand>`?
+
+`wild chat {resume, new, ls, close, ask}` are **session-management
+verbs** for scripting. `resume` / `new` / `ls` / `close` operate on
+the persisted SQLite session store; `ask` does a one-shot publish +
+await against the Elder operator-chat lane, same as the
+REST `/api/v1/tribes/root/turns` twin (`wild chat ask "deploy …"
+--json | jq` for bash scripts).
+
+Every ask is a turn of a conversation. Without `--session` the ask
+starts a new one under the profile — the same `SES-…` row `wild chat
+ls` shows, with your words and the reply kept on it — and prints its id
+on stderr (`↩ session SES-… — continue with …`; `--json` carries it as
+`session`). `wild chat ask --session <id>` continues that conversation
+(or rides any token of your own, the REST door's `session`). Two asks
+under the **same** id are one conversation: the Elder keeps its
+transcript, and a reply that asked you for a yes can be answered by the
+next ask — `wild chat ask --tribe digest-lab "Soll ich hn-digest bauen
+lassen?"` then `wild chat ask --tribe digest-lab --session SES-… "ja"`
+releases the build request the first reply named, exactly as typing „ja"
+in the REPL or the dashboard would. A session of another tribe or an
+out-of-shape id (`[A-Za-z0-9_-]{1,64}`) is refused by name, never
+silently replaced. The interactive REPL is one conversation for its
+whole run, kept the same way.
+
+The interactive REPL is bare `wild chat` (no subcommand) — the
+default action. See `docs/inline-chat-design.md`
+for the full design.
+
+## Read more
+
+- ADR-0010 — the original split
+  rule with rationale + migration plan.
+- `docs/inline-chat-design.md` — chat REPL
+  design (slash matrix, streaming, session state).
+- `docs/watch-dashboard-design.md` —
+  watch console design (3-pane layout, Forge-pane extension shape).
+- ADR-0009 — why config CLI
+  verbs are RPC clients.
+- `docs/elder.md` — how chat REPL talks to
+  the Elder.
+- `docs/development.md` — adding a CLI verb or
+  chat slash command.

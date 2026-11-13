@@ -1,0 +1,139 @@
+// WILD Tasks Interface
+// Cycle-state tracking only. Task dispatch and result reporting are
+// intentionally NOT typed interfaces — both are domain events on the
+// bus.
+//
+// Task dispatch (orchestrator → worker):
+//   The orchestrator publishes a `WorkerTask` (defined in common)
+//   on `wild.{tribe}.worker.{type}.task` via wild:messaging,
+//   with a subject allowlist on its messaging-link config in the
+//   rendered `Plan`. Before publish, the orchestrator appends a
+//   `pending-task` entry via tracking.
+//
+// Result reporting (worker → bus):
+//   Workers publish `WorkerResultEvent` (defined in common) on
+//   `wild.{tribe}.worker.{type}.result` via wild:messaging.
+//   system subscribes the result subjects, applies the wake
+//   strategy, updates pending-tasks via tracking, and emits
+//   `wild.{tribe}.chief.trigger.result`.
+//
+// Why no `dispatch` and no `results` interface:
+//   Domain events belong on the bus so multiple subscribers (system,
+//   TUI, Phase-B Cockpit/Audit) can observe independently. A typed RPC
+//   would force re-publish or make system a mandatory mediator.
+//   `tracking` stays typed because it is pure KV state, not an event.
+
+package wild:tasks@0.3.0;
+
+/// Cycle-state tracking. Implemented by storage; called by both
+/// the orchestrator (during a cycle) and system (when routing
+/// worker results and applying wake strategy).
+///
+/// All state lives in NATS KV bucket `tribe-state`, keys scoped
+/// by tribe. See prototype-spec.md §2 for the schema.
+///
+/// Org-scope discipline:
+///   Every function takes an `tribe-id` argument. The storage
+///   provider validates it against the caller's identity (derived
+///   from the host-stamped `actor`/`originator` on the envelope, not
+///   the argument itself):
+///     · Orchestrator components may only touch their OWN
+///       tribe's state. Mismatch → "scope-violation".
+///     · The system provider has a privileged path (it runs as a
+///       native provider, not as an tribe component) — its
+///       calls bypass the check because system is the result-router
+///       for ALL tribes. Storage authenticates this via the
+///       link's source provider id, not by looking at the arg.
+///   Phase B sub-tribe hierarchy does NOT widen this — even a
+///   parent orchestrator does not directly poke a child's state;
+///   it goes through system or through the child's own messages.
+interface tracking {
+
+    record cycle-state {
+        cycle-id: string,
+        started-at-ms: u64,
+        trigger-kind: string,           // schedule | result | user | deferred
+        trigger-payload: string,        // JSON
+        last-think-hash: option<string>,
+    }
+
+    record pending-task {
+        task-id: string,
+        cycle-id: string,
+        // Per-instance routing slug (e.g. "sales-analyst",
+        // "competitor-crawl"). Validated by
+        // common::subjects::is_valid_worker_name on the host side.
+        worker-name: string,
+        // Wasm image identity from common::subjects::COMPONENT_TYPES
+        // ("orchestrator" | "ai-worker" | "http-fetcher").
+        component-type: string,
+        prompt: string,
+        dispatched-at-ms: u64,
+        timeout-at-ms: u64,
+        status: string,                 // pending | completed | failed | timeout
+        result-key: option<string>,
+        summary: option<string>,
+        // ADR-0052 §4 — dispatch/goal marker ("mission" | "self"). Default
+        // "mission" (the F3 judge runs); "self" routes the result past the
+        // mission judge (read by the MailRouter, PR2). Parsed against
+        // common::self_modeling::Target.
+        target: string,
+    }
+
+    /// CAS-acquire the cycle lock. Returns true if acquired.
+    /// On success, lock is held for `ttl-seconds`. (The host refreshes
+    /// long-held locks directly via the storage provider, not over WIT.)
+    acquire-lock: func(
+        tribe-id: string,
+        holder: string,                 // cycle-uuid
+        ttl-seconds: u32,
+    ) -> result<bool, string>;
+
+    /// Release the lock. Idempotent — releasing an already-released
+    /// or expired lock is not an error.
+    release-lock: func(tribe-id: string, holder: string)
+        -> result<_, string>;
+
+    /// Read full cycle state (cycle key + pending tasks + results buffer).
+    /// Returned as JSON string to keep WIT simple — caller deserializes.
+    read-cycle-state: func(tribe-id: string)
+        -> result<string, string>;
+
+    /// Save cycle metadata (cycle-id, last-think-hash, etc).
+    write-cycle-meta: func(tribe-id: string, state: cycle-state)
+        -> result<_, string>;
+
+    /// Append/update a pending-task entry. Used by the orchestrator
+    /// when dispatching (append `pending`) and by the system
+    /// result-router when a result arrives (update to `completed` /
+    /// `failed` / `timeout`).
+    upsert-pending-task: func(tribe-id: string, task: pending-task)
+        -> result<_, string>;
+
+    /// One drained result with enough metadata for the orchestrator's
+    /// hash-diff gate to reason about whether this is a "new" result
+    /// vs. a re-delivery, without forcing it to read the full
+    /// pending-task entry.
+    record drained-result {
+        task-id: string,
+        worker-name: string,
+        /// "completed" | "failed" | "timeout"
+        status: string,
+        /// Short human-readable summary written by the worker into
+        /// WorkerResultEvent.summary. None when status != "completed"
+        /// or when the worker didn't supply one.
+        summary: option<string>,
+        /// Set when the worker persisted MD output via wild:files/write.
+        /// Used by the orchestrator to load the result content
+        /// on-demand inside the cycle prompt.
+        result-key: option<string>,
+    }
+
+    /// Read and clear the results-buffer. Called at cycle start.
+    /// The provider joins each task-id against the pending-tasks KV
+    /// to build the `drained-result` records — caller never needs
+    /// a second round-trip.
+    drain-results: func(tribe-id: string)
+        -> result<list<drained-result>, string>;
+}
+

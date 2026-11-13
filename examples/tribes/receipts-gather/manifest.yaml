@@ -1,0 +1,19 @@
+# `wild tribe apply <bundle> --as <id>` reads this. Schema:
+# `crates/runtime/wild-tribe-ops/src/bundle.rs::BundleManifest`.
+#
+# The MINIMAL gather-flow reference bundle: one folder source whose per-file
+# fan-out children converge on an ADR-0128 `gather` step, and ONE operator
+# notice (ADR-0125 `notify-operator`) goes out for the whole batch — the
+# batch-collapse flow, end to end, with zero LLM turns. Authored the DDD way
+# (the one `ontology/model.yaml` is the constitution); primarily the fixture
+# behind `tests/e2e/tribes/04-receipts-gather-flow.sh`, and the smallest
+# committed example of `does: gather`.
+schema_version: "1"
+name: receipts-gather
+description: >-
+  Receipts folder intake that gathers the per-file results and notifies the
+  operator once per pull — the minimal ADR-0128 gather-flow reference.
+authoring_method: ddd
+parent_tribe: root
+# The whole flow is deterministic (fan-out + gather + notify) — no worker.
+workers: []

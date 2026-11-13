@@ -1,0 +1,6 @@
+viewing_id,date,time_slot,phone,vehicle_id,status,notes
+view-0001,2026-08-14,10:30,+491701234501,mob-401882731,confirmed,asked for a test drive after the viewing
+view-0002,2026-08-15,14:00,+491701234502,mob-401882745,requested,
+view-0003,2026-08-17,11:00,+491701234503,mob-401883004,confirmed,charging questions expected — bring the wallbox leaflet
+view-0004,2026-08-10,16:30,+491701234504,mob-401883049,completed,bought the car — deal closed on site
+view-0005,2026-08-12,09:00,+491701234505,mob-401882803,no_show,did not appear; follow-up declined

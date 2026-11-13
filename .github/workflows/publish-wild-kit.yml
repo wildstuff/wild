@@ -1,0 +1,229 @@
+name: Publish wild-kit to crates.io
+
+# The publish lane of the producer kit's two library crates:
+# `wild-ingest-contract`, the wire contract, and `wild-kit`, the producer
+# client built on it (package dir `crates/wild-kit-producer`). Both
+# MIT OR Apache-2.0, for connector developers.
+#
+# This file runs in the PUBLIC repository `wildstuff/wild` and is not edited
+# here: the development repository keeps its one source, and its sync writes
+# it into this tree together with the two crates and the workspace root they
+# package under. crates.io's Trusted Publisher entry names this repository,
+# this file name (`publish-wild-kit.yml`) and the `crates-io-publish`
+# environment — rename none of them without changing the entry first.
+#
+# crates.io Trusted Publishing: the `publish` job asks GitHub for an OIDC
+# token and `rust-lang/crates-io-auth-action` trades it for a crates.io token
+# that lives about 30 minutes. No crates.io token is stored anywhere — not
+# as a repo secret, not as an environment secret. crates.io accepts the OIDC
+# token only from THIS workflow file in THIS repository running in the
+# `crates-io-publish` environment, and that environment is where a required
+# reviewer sits. The environment admits `main` only, so the lane runs from
+# `main`.
+#
+# Three jobs, so the job holding the publish token sees no secret and runs
+# no repository code but the crate it publishes:
+#   • package — checks the crate out, packages it (`cargo package`), runs the
+#     guards and uploads the `.crate`. The tree is public and its workspace
+#     has no git dependency, so no token is needed to load it.
+#   • dry-run — the default. Unpacks the `.crate` outside any workspace and
+#     runs `cargo publish --dry-run` on it: a full verify build against the
+#     registry, no token, no upload.
+#   • publish — only with `dry_run: false`. The same unpacked `.crate`,
+#     a minted token, `cargo publish`. Waits for the environment's reviewer.
+#
+# A crates.io version can never be replaced or deleted (a yank only hides
+# it), so the order matters: `wild-ingest-contract` first, then `wild-kit`.
+# The package job refuses `wild-kit` while the exact contract version it
+# depends on is not on crates.io, and refuses any version that is already
+# there.
+
+on:
+  workflow_dispatch:
+    inputs:
+      crate:
+        description: "The crate to publish. wild-ingest-contract goes first; wild-kit needs its contract version on crates.io."
+        type: choice
+        required: true
+        options:
+          - wild-ingest-contract
+          - wild-kit
+      dry_run:
+        description: "Package and verify only; upload nothing. Untick to publish for real (a published version is permanent)."
+        type: boolean
+        required: false
+        default: true
+
+concurrency:
+  group: publish-wild-kit
+  cancel-in-progress: false
+
+# Every job grants itself what it needs and nothing more.
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_TERM_PROGRESS_WHEN: never
+  CRATE: ${{ inputs.crate }}
+  # crates.io refuses an API request without a User-Agent naming the client.
+  CRATES_IO_UA: "wildstuff-publish-wild-kit (github.com/wildstuff)"
+
+jobs:
+  package:
+    name: package ${{ inputs.crate }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Publish from main only
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::a crate is published from main only, not from ${GITHUB_REF} — run the workflow again with main selected"
+          exit 1
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.99.1
+      - name: Package the crate
+        # `--no-verify`: the verify build runs in the dry-run / publish job,
+        # from the unpacked `.crate`. Packaging `wild-kit` alone still
+        # resolves the exact contract version it names on crates.io, so it
+        # fails here until that contract version is published — the order
+        # this lane demands anyway.
+        run: |
+          set -euo pipefail
+          cargo package -p "$CRATE" --list
+          cargo package -p "$CRATE" --no-verify
+          target_dir=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+          crate_file=$(ls "$target_dir"/package/"$CRATE"-*.crate)
+          mkdir -p "$RUNNER_TEMP/crate"
+          cp "$crate_file" "$RUNNER_TEMP/crate/"
+      - name: Guard — version not yet on crates.io, contract published first
+        run: |
+          set -euo pipefail
+          crate_file=$(ls "$RUNNER_TEMP"/crate/*.crate)
+          python3 - "$crate_file" <<'PY'
+          import json, sys, tarfile, tomllib, urllib.error, urllib.request, os
+
+          crate_file = sys.argv[1]
+          ua = os.environ["CRATES_IO_UA"]
+
+          def on_crates_io(name, version):
+              """True when crates.io holds `name@version` and it is not yanked."""
+              req = urllib.request.Request(
+                  f"https://crates.io/api/v1/crates/{name}/{version}",
+                  headers={"User-Agent": ua},
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      return not json.load(resp)["version"]["yanked"]
+              except urllib.error.HTTPError as err:
+                  if err.code == 404:
+                      return False
+                  raise
+
+          with tarfile.open(crate_file) as tar:
+              top = tar.getnames()[0].split("/")[0]
+              manifest = tomllib.load(tar.extractfile(f"{top}/Cargo.toml"))
+          name = manifest["package"]["name"]
+          version = manifest["package"]["version"]
+
+          if on_crates_io(name, version):
+              print(f"::error::{name} {version} is already on crates.io — a published version is permanent; raise the version in its Cargo.toml first")
+              sys.exit(1)
+
+          dep = manifest.get("dependencies", {}).get("wild-ingest-contract")
+          if dep is not None:
+              want = dep["version"] if isinstance(dep, dict) else dep
+              want = want.lstrip("=^ ")
+              if not on_crates_io("wild-ingest-contract", want):
+                  print(f"::error::{name} {version} depends on wild-ingest-contract {want}, which is not on crates.io — publish wild-ingest-contract {want} first")
+                  sys.exit(1)
+              print(f"wild-ingest-contract {want} is on crates.io")
+          print(f"{name} {version} is not on crates.io yet")
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: crate
+          path: ${{ runner.temp }}/crate/*.crate
+          if-no-files-found: error
+          retention-days: 7
+
+  dry-run:
+    name: dry run ${{ inputs.crate }}
+    needs: package
+    if: inputs.dry_run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions: {}
+    steps:
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.99.1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: crate
+          path: ${{ runner.temp }}/crate
+      - name: Unpack the crate outside any workspace
+        id: unpack
+        run: |
+          set -euo pipefail
+          crate_file=$(ls "$RUNNER_TEMP"/crate/*.crate)
+          mkdir -p "$RUNNER_TEMP/src"
+          tar -xzf "$crate_file" -C "$RUNNER_TEMP/src"
+          dir=$(ls -d "$RUNNER_TEMP"/src/*/)
+          # cargo writes both files itself and refuses a package that brings its own.
+          rm -f "$dir/Cargo.toml.orig" "$dir/.cargo_vcs_info.json"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+      - name: cargo publish --dry-run
+        working-directory: ${{ steps.unpack.outputs.dir }}
+        run: |
+          set -euo pipefail
+          cargo package --list
+          cargo publish --dry-run
+
+  publish:
+    name: publish ${{ inputs.crate }}
+    needs: package
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # The required reviewer sits on this environment, and the crates.io
+    # trusted-publisher entry names it: no other job can mint the token.
+    environment: crates-io-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.99.1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: crate
+          path: ${{ runner.temp }}/crate
+      - name: Unpack the crate outside any workspace
+        id: unpack
+        run: |
+          set -euo pipefail
+          crate_file=$(ls "$RUNNER_TEMP"/crate/*.crate)
+          mkdir -p "$RUNNER_TEMP/src"
+          tar -xzf "$crate_file" -C "$RUNNER_TEMP/src"
+          dir=$(ls -d "$RUNNER_TEMP"/src/*/)
+          rm -f "$dir/Cargo.toml.orig" "$dir/.cargo_vcs_info.json"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+      - name: Mint a short-lived crates.io token (Trusted Publishing)
+        id: auth
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+      - name: cargo publish
+        working-directory: ${{ steps.unpack.outputs.dir }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          cargo package --list
+          cargo publish

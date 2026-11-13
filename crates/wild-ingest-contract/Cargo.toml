@@ -1,0 +1,43 @@
+# wild-ingest-contract — the wire contract of the producer ingest door (ADR-0365).
+#
+# ONE definition of every request, reply, code and bound a producer outside the
+# daemon speaks to the ingest door. The door (#9893), the `wild-kit` conformance
+# kit (#9894) and the published JSON Schemas all derive from these types, so no
+# second representation is ever kept by hand (CLAUDE.md, "No new hand-mirrored
+# surface").
+#
+# MIT OR Apache-2.0: it is the contract a third party builds a producer
+# against (ADR-0225 D6 contract tier; the dual licence is the operator decision
+# of 2026-11-07, so the producer library can be published with it).
+#
+# Keep it a leaf: serde, schemars and a hash only (and no `wild-*` crate). Producers in other languages
+# never link it; they read the JSON Schemas generated from it
+# (`cargo run -p xtask -- ingest-contract-write`, freshness-tested here).
+[package]
+name         = "wild-ingest-contract"
+version      = "0.1.1"
+edition      = { workspace = true }
+rust-version = "1.85"
+# The repo-side drift gate `tests/committed_schemas.rs` reads the workspace's
+# schema dir, so the packaged crate leaves `tests/` out (as wild-kit does).
+exclude      = ["tests/"]
+license      = "MIT OR Apache-2.0"
+repository   = "https://github.com/wildstuff/wild"
+description  = "wild — the wire contract of the producer ingest door (ADR-0365): requests, replies, codes, key classes and bounds, with the JSON Schemas derived from them."
+readme       = "README.md"
+keywords     = ["wild", "ingest", "producer", "json-schema", "contract"]
+categories   = ["api-bindings", "encoding"]
+
+[lib]
+name = "wild_ingest_contract"
+path = "src/lib.rs"
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+schemars   = { workspace = true }
+sha2       = { workspace = true }
+hex        = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,41 @@
+{
+  "$defs": {
+    "ToolCall": {
+      "description": "One call Wild hands a device.",
+      "properties": {
+        "arguments": {
+          "description": "The arguments, checked against the tool's schema before the call was\nqueued."
+        },
+        "call": {
+          "description": "The call's id: the device names it in its answer.",
+          "type": "string"
+        },
+        "tool": {
+          "description": "The tool called, by the name the manifest announced.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "call",
+        "tool",
+        "arguments"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The answer to a call wait: the calls queued for the device, oldest first.\nEmpty when none came while the wait was held: open the next one.",
+  "properties": {
+    "calls": {
+      "items": {
+        "$ref": "#/$defs/ToolCall"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "calls"
+  ],
+  "title": "Calls",
+  "type": "object"
+}

@@ -1,0 +1,17 @@
+flowchart LR
+    Producer["Your producer<br/>(any language)"]
+    subgraph kit["wild-kit — on your machine"]
+        KitDoor["the real ingest door<br/>(the same code as Wild's)"]
+        Sandbox[("throwaway sandbox<br/>no operator data")]
+        Report["PASS / FAIL<br/>one line per check"]
+        KitDoor --> Sandbox
+        Sandbox --> Report
+    end
+    subgraph wild["The Wild — the operator's install"]
+        Door["ingest door"]
+        Yes{"the operator's yes"}
+        Tribe[("a Tribe's table")]
+        Door --> Yes --> Tribe
+    end
+    Producer -- "1 · prove it" --> KitDoor
+    Producer -. "2 · then for real" .-> Door

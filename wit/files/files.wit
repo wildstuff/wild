@@ -1,0 +1,236 @@
+// WILD Files Interface
+// Per-tribe logical-path file storage. FS-canonical (ADR-0026):
+// bytes live at `<profile_root>/files/<tribe>/<logical-path>`;
+// the host stamps the caller's tribe-id at the WIT-call boundary.
+// Implemented by `providers::storage::fs_files`; consumed by Wasm
+// components (orchestrator, ai-worker, http-fetcher) that need to
+// write or read files attributable to a tribe.
+//
+// Three interfaces — split deliberately so the wRPC link layer
+// can grant capabilities at the right granularity:
+//
+//   `read`    — non-destructive READS:
+//               read / list.
+//               Granted to components that consume content
+//               (agents that summarise attachments, the
+//               orchestrator that forwards files between agents).
+//
+//   `write`   — CREATE-only writes:
+//               write.
+//               Granted to components that produce content
+//               (agents that emit reports, http-fetcher that
+//               saves crawled bodies). Cannot delete or replace
+//               another caller's file (write bumps revision —
+//               history stays intact).
+//
+//   `manage`  — DESTRUCTIVE ops:
+//               delete.
+//               Granted only to components that need cleanup
+//               authority (orchestrator, future GC tools).
+//               Most agents should NOT have this link.
+//
+// Authorisation:
+//
+//   The split lives at the wRPC link layer. A component that
+//   imports `wild:files/write` cannot call `wild:files/manage::delete`
+//   even if the same caller-org owns the file — the wRPC subject
+//   never reaches the manage handler because the link wasn't
+//   authorised — capability separation enforced at link-grant time,
+//   not inside the handler.
+//
+// Bucket-scope discipline:
+//   - Writes are SAME-ORG ONLY. The storage provider derives
+//     `caller_org` from the wRPC link metadata; a write to a
+//     different org's bucket → `file-error.scope-violation`.
+//   - Reads default to same-org. Cross-org reads (`target_org`
+//     != caller) are gated by the existing `wild:linkages` grant
+//     table — same rule the docs interface uses for cross-org
+//     reads. Without a matching grant: `cross-org-denied`.
+//
+// Versioning:
+//   Every successful write bumps the revision under
+//   `(tribe_id, logical_path)`. Old revisions stay queryable
+//   for audit / rollback; their blob bytes survive in the
+//   BlobStore until the mark-and-sweep GC sweeps orphans.
+//
+// @0.4.0 folds the ADR-0100 D2 `stream<u8>` verbs back in from the interim
+// isolated `wild:file-stream@0.1.0` package (now deleted): a `stream<u8>` /
+// `async func` was unparseable by wit-bindgen 0.35, so it lived apart until
+// every `wild:files` consumer moved to 0.58 (the tree-wide bump). The stream
+// halves (`reader`/`writer`) need the component-model-async ABI (wasmtime 46
+// / wit-bindgen 0.58).
+
+package wild:files@0.4.0;
+
+interface types {
+
+    /// Mirror of `RelationalStore::BlobRefRow` for the wire.
+    /// SHA-256 hex; mime/agent/uploaded-at carry the metadata
+    /// the cli + audit panels need.
+    record file-meta {
+        /// Logical path relative to the org bucket (e.g.
+        /// "chat/uploads/photo.png"). Must NOT start with "/"
+        /// or contain "." / ".." segments.
+        path: string,
+        /// SHA-256 of the bytes, lowercase hex (64 chars).
+        digest: string,
+        /// Append-only revision number. Bumps on every write.
+        revision: u64,
+        /// MIME type the writer specified. Empty when unknown.
+        mime: string,
+        /// Total byte count.
+        size-bytes: u64,
+        /// Agent/component label that wrote this revision.
+        agent: string,
+        /// ISO-8601 timestamp.
+        uploaded-at: string,
+    }
+
+    /// Common error shape. The storage provider maps its internal
+    /// `FileError` onto this surface — callers handle the variant
+    /// and don't need to parse a string.
+    variant file-error {
+        /// Caller tried to write to or list a different org's
+        /// bucket without going through the cross-org grant path.
+        scope-violation,
+        /// `target_org/path` doesn't exist (or every revision
+        /// has been deleted).
+        not-found,
+        /// Cross-org read attempted but no linkage grant
+        /// matches the (caller_org, target_org, path) tuple.
+        cross-org-denied,
+        /// `path` violates the logical-path rules (empty,
+        /// leading slash, "." / ".." segments).
+        invalid-path(string),
+        /// Inline write payload exceeds INLINE_MAX_BYTES
+        /// (default 4 MiB).
+        inline-cap-exceeded(u64),
+        /// Catch-all for storage backend errors (FS full, EIO,
+        /// permission denied, etc.). Carries a human-readable
+        /// string for the audit panel.
+        backend(string),
+        /// A surgical `workspace.edit` could not be applied because
+        /// `old` was absent from the file, or matched more than once
+        /// (the replacement must be exact + unique). Expected
+        /// control-flow — the caller retries with more context — not
+        /// a storage failure. Carries a human-readable detail.
+        edit-conflict(string),
+    }
+}
+
+/// READ path — inspection + download.
+interface read {
+    use types.{file-meta, file-error};
+
+    /// Read latest revision. `target-org == caller_org` for
+    /// same-org reads; cross-org reads require an active linkage
+    /// grant matching `(caller_org, target_org, path)`.
+    read: func(
+        target-org: string,
+        path: string,
+    ) -> result<tuple<file-meta, list<u8>>, file-error>;
+
+    /// List the latest revision of every file in `caller_org`'s
+    /// bucket whose path starts with `prefix`. Cross-org list
+    /// is reserved for Phase E.
+    %list: func(prefix: string) -> result<list<file-meta>, file-error>;
+}
+
+/// WRITE path — create-only. Cannot delete or replace.
+/// (`write` bumps the revision; old revisions stay queryable.
+/// Hard removal happens via `manage::delete`.)
+interface write {
+    use types.{file-meta, file-error};
+
+    /// Single-shot write. Same-org only. Returns the resulting
+    /// metadata (digest + revision + final size).
+    /// Hard cap: 4 MiB inline.
+    write: func(
+        path: string,
+        bytes: list<u8>,
+        mime: option<string>,
+    ) -> result<file-meta, file-error>;
+}
+
+/// MANAGE path — destructive. Granted sparingly; the
+/// orchestrator + GC tools get it, agents typically don't.
+interface manage {
+    use types.{file-error};
+
+    /// Drop every revision of `(caller_org, path)`. The blob
+    /// bytes themselves stay until the mark-and-sweep GC runs
+    /// (another (org, path) might still reference the same
+    /// digest). Returns the number of revisions removed.
+    delete: func(path: string) -> result<u32, file-error>;
+}
+
+/// WORKSPACE path — the editable forged-source tree.
+///
+/// Distinct from `read`/`write` (which sit under
+/// `<profile_root>/files/<tribe>/`): this surface is jailed to the
+/// CANONICAL, EDITABLE source workspace of one forged component at
+/// `<profile_root>/tribes/<caller-tribe>/forged/<component>/`. It is
+/// the mutable source-of-truth Forge re-reads (≠ the immutable,
+/// build-id-keyed forensic snapshots under `forge/builds/`).
+///
+/// Path-jail: every verb is scoped to the caller's tribe (stamped at
+/// the WIT-call boundary) AND the `component` segment. The host
+/// rejects `..`, absolute paths, empty segments — so a caller can't
+/// escape its component subtree, reach another tribe, the profile
+/// root, secrets, or the `forge/builds` forensic record.
+///
+/// Single-shot: `write` overwrites in place (revision = 1) so a
+/// targeted edit produces a small `git diff`, not a full rewrite;
+/// `edit` (ADR-0060) goes further — an exact, unique string replace
+/// that makes surgical edits the path of least resistance.
+interface workspace {
+    use types.{file-meta, file-error};
+
+    /// Read one file's full bytes at
+    /// `tribes/<caller-tribe>/forged/<component>/<path>`.
+    read: func(
+        component: string,
+        path: string,
+    ) -> result<list<u8>, file-error>;
+
+    /// List every file under the component workspace whose path
+    /// starts with `prefix` (empty prefix → the whole tree).
+    %list: func(
+        component: string,
+        prefix: string,
+    ) -> result<list<file-meta>, file-error>;
+
+    /// Atomic single-shot write (overwrite-in-place) at
+    /// `tribes/<caller-tribe>/forged/<component>/<path>`. Creates
+    /// parent dirs as needed. Returns the resulting metadata.
+    write: func(
+        component: string,
+        path: string,
+        bytes: list<u8>,
+    ) -> result<file-meta, file-error>;
+
+    /// Surgical edit (ADR-0060 Strand 1): replace the single,
+    /// EXACT, UNIQUE occurrence of `old` with `new` in the file at
+    /// `tribes/<caller-tribe>/forged/<component>/<path>`, leaving
+    /// every other line untouched, then overwrite-in-place.
+    ///
+    /// Fails with `edit-conflict` if `old` is absent or matches more
+    /// than once, and with `not-found` if the file does not exist.
+    /// This is the path of least resistance for evolving existing
+    /// source — `write` stays for CREATING new files. Same path-jail
+    /// and tribe-scope as `write`.
+    edit: func(
+        component: string,
+        path: string,
+        old: string,
+        new: string,
+    ) -> result<file-meta, file-error>;
+}
+
+// NOTE: the ADR-0100 D2 native streaming halves (`reader` / `writer`,
+// `stream<u8>` / `async func`) live in the sibling file `stream.wit` — same
+// `wild:files@0.4.0` package, split out because wit-bindgen 0.35 /
+// cargo-component 0.18 cannot parse `async func`. Keeping THIS file async-free
+// lets a 0.35 consumer (the forge's forged-component build) vendor `files.wit`
+// alone for the sync `read`/`write` capabilities; the host + 0.58 guests read
+// the whole `wit/files/` directory and see all interfaces.

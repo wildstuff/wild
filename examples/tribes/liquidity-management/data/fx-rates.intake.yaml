@@ -1,0 +1,17 @@
+# Intake mapping for the seeded ECB reference-rate snapshot.
+#
+# It exists because a `data/*.csv` is matched to a target type by the
+# FINGERPRINT of its header, and that fingerprint is only registered by an
+# `.intake.yaml` beside it. A CSV without this file is skipped — named, with
+# its reason — and the apply FAILS instead of deploying green around the hole
+# (`--allow-holes` opts into a partial seed deliberately).
+#
+# NOTE the shape difference from the live feed: this file is the three columns
+# the tribe keeps, while the `ecb-fx` source in the model declares the API's
+# full 32-column SDMX response and maps three of them. Two shapes, two
+# fingerprints, one target type — which is exactly what the fingerprint
+# mechanism is for, and why the seed does not have to imitate the wire format.
+target_type: fx_rate
+# Both key parts. A partial key would collapse every currency onto one row.
+key: [currency, rate_date]
+columns: [currency, rate_date, rate_per_eur]

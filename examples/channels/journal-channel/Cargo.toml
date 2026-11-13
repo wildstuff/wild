@@ -1,0 +1,51 @@
+# Minimal CHANNEL-flavor (transport-axis) Tier-2 plugin example — the
+# host-calls-deliver → journal-the-notification shape. No external
+# service, no account, no token: the "transport" is one bus publish per
+# delivery, inspectable from `wild watch`'s Bus pane.
+#
+# Standalone — NOT a member of the host workspace (the wasm32 target
+# would otherwise pull host-target deps into the embedded host's build;
+# see plugins/workers/ai-worker/Cargo.toml for the full rationale).
+# Build it explicitly with `./build.sh`.
+[workspace]
+
+[package]
+name         = "journal-channel"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.97.0"
+license      = "Apache-2.0"
+repository   = "https://github.com/wildstuff/the-wild"
+description  = "Example channel-flavor operator channel — journals every delivered operator notification as one bus event instead of pushing to an external service (Tier-2 plugin)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "=0.58.0", features = ["async-spawn"] }
+serde_json  = "1"
+
+# Wasm components are single-threaded; no tokio.
+
+[package.metadata.component]
+package = "wildstuff:journal-channel"
+
+[package.metadata.component.target]
+path  = "wit"
+world = "journal-channel"
+
+# WIT-package deps for the world's imports + exports. Path deps straight
+# at the canonical text-WIT under `wit/<pkg>/`. The wit-bindgen macro
+# ALSO reads `wit/deps/<name>/` next to `wit/world.wit` (checked-in
+# symlinks resolving to the same files), so both surfaces have to agree
+# — see ./wit/deps/.
+[package.metadata.component.target.dependencies]
+"wild:plugin-meta"      = { path = "../../../wit/plugin-meta/plugin-meta.wit" }
+"wild:operator-channel" = { path = "../../../wit/operator-channel/operator-channel.wit" }
+"wild:messaging"        = { path = "../../../wit/messaging/messaging.wit" }
+
+[profile.release]
+opt-level     = "z"
+lto           = true
+strip         = true
+codegen-units = 1

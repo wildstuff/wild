@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A device's answer to one call.",
+  "properties": {
+    "call": {
+      "description": "The `call` of the call it answers.",
+      "type": "string"
+    },
+    "result": {
+      "description": "What the call did, as JSON of the tool's own shape."
+    }
+  },
+  "required": [
+    "call",
+    "result"
+  ],
+  "title": "CallAnswer",
+  "type": "object"
+}

@@ -1,0 +1,35 @@
+# web-crawler — the ADR-0114 first instance: a crawler with ZERO
+# crawler-specific core code. Everything below is configuration of the
+# shipped queue-fed intake pieces (D1–D6): an entity work queue
+# (`crawl_queue`), the generic `queue-enumerate` connector paired with
+# `url-fetch`, the drain triggers, the host completion flip, and a
+# frontier worker that is the GENERIC ai-worker configured by prompt —
+# the same agnostic-core pattern as liquidity-management's
+# dunning-notifier (the platform ships no `frontier` component).
+#
+#   wild tribe apply examples/tribes/web-crawler/ --as acme-crawler
+#
+# Governance is entirely inherited: the egress allowlist is the crawl
+# boundary (ADR-0090 — a fetch of an off-allowlist link is DENIED and
+# audited, the run continues), its rate limits are the politeness
+# floor, `depth` is the frontier budget.
+
+schema_version: "1"
+
+name: web-crawler
+
+description: >
+  Crawls a governed set of web pages through the queue-fed intake lane
+  (ADR-0114): operators (or workers) enqueue URLs as `crawl_queue` rows,
+  the drain fetches each `pending` row through `url-fetch`, ingested
+  pages flip `done` at the host completion seam, and a frontier worker
+  enqueues newly discovered links until the declared depth ceiling.
+
+parent_tribe: root
+
+# The crawl is Chief-free (the queue's own triggers drive it); the chief
+# wakes daily to reflect on coverage (pending vs done vs failed counts).
+schedule_reflect: "0 18 * * *"
+
+workers:
+  - ref: workers/frontier.md

@@ -1,0 +1,4 @@
+# Auto-intake: columns map 1:1 onto the `customer` type's fields.
+target_type: customer
+key: [phone]
+columns: [phone, name, language, lead_source, lead_status]

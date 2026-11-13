@@ -1,0 +1,169 @@
+// `wild:plugin-meta` — minimum contract every Tier-2 plugin exports.
+//
+// Plugin Concept P1 (W1). Plugin authors `include`
+// `wild:plugin-meta/plugin-base@0.3.0` into their own world to inherit
+// the three lifecycle calls (`manifest`, `init`, `shutdown`) regardless
+// of which capability WIT they additionally export. The host-side
+// `ComponentBackedHostPlugin<W>` shim bindgen's against the same world
+// so it can call `meta::manifest()` to cross-check against the sidecar
+// `<profile_root>/plugins/<slug>.json`, then `meta::init(config_bytes)`
+// once per pooled instance, and `meta::shutdown()` on host teardown.
+//
+// The contract is deliberately tiny — just enough to make a generic
+// loader possible. Capability-specific surfaces (`wild:llm-adapter`,
+// `wild:tool-provider`, `wild:storage-adapter`, `wild:embed-adapter`)
+// land as their own packages and are exported alongside `meta` in the
+// plugin's world.
+//
+// Composition example (single-role provider):
+//
+//   world llm-adapter-plugin {
+//       include wild:plugin-meta/plugin-base@0.3.0;
+//       import wild:secrets/store@0.1.0;
+//       import wasi:http/outgoing-handler@0.2.0;
+//       export wild:llm-adapter/chat@0.2.0;
+//   }
+//
+// Composition example (multi-role plugin):
+//
+//   world sharepoint-connector-plugin {
+//       include wild:plugin-meta/plugin-base@0.3.0;
+//       import wild:secrets/store@0.1.0;
+//       import wasi:http/outgoing-handler@0.2.0;
+//       export wild:tool-provider/tools@0.4.0;
+//       export wild:worker/handler@0.1.0;
+//       export wild:function/backing@0.1.0;
+//   }
+
+package wild:plugin-meta@0.3.0;
+
+interface meta {
+    /// Self-report of the plugin's installed-time identity. The host
+    /// cross-checks every field against the sidecar `.json` written
+    /// at `wild plugin add` time. `slug`/`version` mismatch = hard
+    /// load error (defends against swapping the wasm under a tag);
+    /// `kind` is informational and only warned on mismatch.
+    record plugin-manifest {
+        /// Stable plugin slug — same value the sidecar carries and
+        /// the per-profile config references. Lower-kebab-case by
+        /// convention. Example: `"openrouter-tier2"`.
+        slug: string,
+        /// SemVer of the plugin build. Cross-checked against the
+        /// sidecar's `version` field.
+        version: string,
+        /// Deprecated derived summary. The host derives the real
+        /// primitive roles from `provides[]` + `capability_bundles[]`;
+        /// single-role plugins may still report `some(provider)` or
+        /// `some(workload)`, multi-role plugins should report `none`.
+        kind: option<plugin-kind>,
+        /// Capability WIT references the plugin EXPORTS. Format:
+        /// `"<namespace>:<package>@<version>"`. Multi-role plugins
+        /// declare every primitive they export (e.g. tool-provider,
+        /// worker/handler, function/backing).
+        provides: list<string>,
+        /// Capability WIT references the plugin IMPORTS. Same format
+        /// as `provides`. The trust-tier gate inspects this list at
+        /// load time (see D3 Stage-2).
+        requires: list<string>,
+        /// Per-profile config keys the plugin reads via `init`'s
+        /// `config_bytes` payload (e.g. `["model", "endpoint"]` for
+        /// an LLM adapter).
+        config-keys: list<string>,
+        /// Component-side secret aliases the plugin imports from
+        /// `wild:secrets/store::get(alias)`. Phase-6 ACL gates which
+        /// real keychain entries each alias resolves to.
+        secret-aliases: list<string>,
+        /// The typed I/O signature(s) this component is the home of
+        /// (ADR-0056). The **manifest is the source of truth** for the
+        /// signature; the LLM-facing surfaces (`tool-spec.json-schema`,
+        /// `tool-spec.description`, the `skill.md` frontmatter) are
+        /// *projected* from it, so the schema + description are authored
+        /// once. Carried unchanged from @0.2.0.
+        signatures: list<sig>,
+    }
+
+    enum plugin-kind {
+        provider,
+        workload,
+    }
+
+    /// One typed I/O signature — the contract a coded consumer composes
+    /// against (ADR-0055 made it *data*; ADR-0056 makes the manifest its
+    /// home). The schemas are JSON-Schema **text**, kept in the
+    /// restricted subset (`crates/spec/src/signature.rs`).
+    record sig {
+        /// The tool/verb/worker this signature describes. For a provider
+        /// this is the `invoke` tool name; for a workload, the worker.
+        /// LLM-facing tool-name rules apply (`^[a-zA-Z0-9_-]{1,64}$`).
+        name: string,
+        /// LLM-readable "what it does + when to use" — so the Chief's
+        /// read-only discovery (ADR-0056 Decision 9) is *understanding*,
+        /// not just listing, and a workload finally has a description it
+        /// lacks today. Projected into `tool-spec.description` + the
+        /// `skill.md` frontmatter.
+        description: string,
+        /// `input_schema` as raw JSON-Schema text (in-subset).
+        input-schema: string,
+        /// `output_schema` as raw JSON-Schema text (in-subset).
+        output-schema: string,
+        /// Worked input→output Examples (ADR-0055 Examples-as-contract).
+        /// The community certification oracle (ADR-0056 Decision 5) runs
+        /// these in the sandbox to verify impl-vs-`output_schema`.
+        examples: list<sig-example>,
+    }
+
+    /// One worked Example for a `sig`: a concrete input and the output it
+    /// must produce. Both are JSON **text** (an instance of the
+    /// corresponding schema), not the schema itself.
+    record sig-example {
+        /// Example input JSON (an instance of `input-schema`).
+        input: string,
+        /// Expected output JSON (an instance of `output-schema`).
+        output: string,
+    }
+
+    /// Failure cases for `init`. Typed so the host can produce a
+    /// helpful skip-reason in `wild doctor` instead of a generic
+    /// "init failed" string.
+    variant init-error {
+        /// Required secret alias is missing from the per-profile
+        /// alias map (or the keychain entry doesn't exist). Carries
+        /// the alias name.
+        missing-secret(string),
+        /// Required config key is missing from the per-profile
+        /// `plugin-config.yaml`. Carries the key name.
+        missing-config-key(string),
+        /// Backend-specific failure (HTTP-client build error, schema
+        /// parse error, …). Carries an opaque string for `wild
+        /// doctor` to surface.
+        backend-init(string),
+    }
+
+    /// Called once per pooled instance, immediately after the
+    /// component is instantiated and before any capability dispatch.
+    /// The plugin returns its self-reported manifest; the host
+    /// cross-checks against the sidecar `.json`. `slug`/`version`
+    /// mismatch fails the load; `kind` is informational and only
+    /// warned on mismatch.
+    manifest: func() -> plugin-manifest;
+
+    /// Hand the plugin its per-profile config bundle (encoded as
+    /// JSON or TOML — the wire format is agreed per capability
+    /// flavor; LLM-adapter uses JSON). Called once per pooled
+    /// instance after `manifest`. Returns `Err(init-error)` to
+    /// abort load — the host marks the plugin Skipped and surfaces
+    /// the typed reason via `wild doctor`.
+    init: func(config: list<u8>) -> result<_, init-error>;
+
+    /// Graceful shutdown — called on `wild down` or plugin unload.
+    /// Best-effort: a panicking shutdown does not abort host
+    /// teardown.
+    shutdown: func();
+}
+
+/// Minimum world every Tier-2 plugin includes. Capability-specific
+/// worlds (`llm-adapter-plugin`, `tool-provider-plugin`, …) compose
+/// this in via `include wild:plugin-meta/plugin-base@0.3.0;`.
+world plugin-base {
+    export meta;
+}

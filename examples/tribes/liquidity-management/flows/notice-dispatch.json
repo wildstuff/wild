@@ -1,0 +1,16 @@
+{
+  "tribe": "acme-liquidity",
+  "def": {
+    "slug": "notice-dispatch",
+    "description": "Deliver a dunning notice: check the level and, from level 2 onward, send it to the debtor via Telegram — otherwise only log it.",
+    "entry": { "kind": "manual", "accepts": "dunning" },
+    "stages": [
+      { "id": "review",  "archetype": "transform",   "mechanism": "assess-dunning", "execution": "agentic", "port": "exclusive" },
+      { "id": "deliver", "archetype": "sink-effect", "mechanism": "telegram-send" }
+    ],
+    "edges": [
+      { "from": "review", "to": "deliver", "when": "level >= 2" },
+      { "from": "review", "to": "terminal:abort(logged only)", "default": true }
+    ]
+  }
+}

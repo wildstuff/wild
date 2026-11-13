@@ -1,0 +1,19 @@
+{
+  "slug": "overlap-rerank",
+  "version": "0.1.0",
+  "source": {
+    "type": "local",
+    "path": "overlap-rerank-0.1.0.wasm"
+  },
+  "wasm_filename": "overlap-rerank-0.1.0.wasm",
+  "trust": {
+    "tier": "community"
+  },
+  "provides": [
+    "wild:rerank-adapter@0.1.0"
+  ],
+  "capability_bundles": [],
+  "config_keys": [],
+  "secret_aliases": [],
+  "default_pool_size": 1
+}

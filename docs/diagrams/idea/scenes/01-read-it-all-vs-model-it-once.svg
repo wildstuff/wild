@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="584" viewBox="0 0 1000 584" font-family="'Chalkboard SE','Comic Sans MS','Segoe Print',sans-serif">
+  <defs>
+    <marker id="ai" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#8b96a3"/>
+    </marker>
+    <marker id="ag" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#2f9e6b"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="584" rx="18" fill="#fbfaf7"/>
+  <text x="500" y="46" text-anchor="middle" font-size="27" font-weight="bold" fill="#1f2933">Two ways to answer the same question</text>
+  <text x="500" y="72" text-anchor="middle" font-size="15" fill="#6b7480">read it all, every time  —  or model it once</text>
+
+  <text x="356" y="102" text-anchor="middle" font-size="16" font-weight="bold" fill="#5b7c99">read it all, every time</text>
+  <text x="768" y="102" text-anchor="middle" font-size="16" font-weight="bold" fill="#2f9e6b">model it once</text>
+
+  <!-- ============ band 1 — per question ============ -->
+  <text x="28" y="194" font-size="12" font-weight="bold" fill="#9aa4af">PER QUESTION</text>
+
+  <rect x="156" y="112" width="400" height="156" rx="12" fill="#eef2f5" stroke="#5b7c99" stroke-width="2"/>
+  <g fill="#ffffff" stroke="#5b7c99" stroke-width="1.6">
+    <rect x="178" y="126" width="80" height="26" rx="7"/>
+    <rect x="270" y="126" width="80" height="26" rx="7"/>
+    <rect x="362" y="126" width="80" height="26" rx="7"/>
+    <rect x="454" y="126" width="80" height="26" rx="7"/>
+  </g>
+  <g font-size="11" fill="#1f2933" text-anchor="middle">
+    <text x="218" y="144">folder</text>
+    <text x="310" y="144">mailbox</text>
+    <text x="402" y="144">ERP</text>
+    <text x="494" y="144">web</text>
+  </g>
+  <g stroke="#8b96a3" stroke-width="1.4" marker-end="url(#ai)">
+    <path d="M218,155 L300,192" fill="none"/>
+    <path d="M310,155 L338,192" fill="none"/>
+    <path d="M402,155 L374,192" fill="none"/>
+    <path d="M494,155 L412,192" fill="none"/>
+  </g>
+  <rect x="228" y="196" width="256" height="50" rx="10" fill="#ffffff" stroke="#5b7c99" stroke-width="2"/>
+  <text x="356" y="215" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#5b7c99">context window</text>
+  <g fill="#cfdae3">
+    <rect x="248" y="226" width="68" height="5" rx="2.5"/>
+    <rect x="324" y="226" width="96" height="5" rx="2.5"/>
+    <rect x="248" y="236" width="120" height="5" rx="2.5"/>
+    <rect x="376" y="236" width="44" height="5" rx="2.5"/>
+  </g>
+  <text x="356" y="262" text-anchor="middle" font-size="12" font-style="italic" fill="#6b7480">every source, re-read — every time</text>
+
+  <rect x="568" y="112" width="400" height="156" rx="12" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2"/>
+  <g fill="#ffffff" stroke="#2f9e6b" stroke-width="1.6">
+    <rect x="590" y="126" width="80" height="26" rx="7"/>
+    <rect x="682" y="126" width="80" height="26" rx="7"/>
+    <rect x="774" y="126" width="80" height="26" rx="7"/>
+    <rect x="866" y="126" width="80" height="26" rx="7"/>
+  </g>
+  <g font-size="11" fill="#1f2933" text-anchor="middle">
+    <text x="630" y="144">folder</text>
+    <text x="722" y="144">mailbox</text>
+    <text x="814" y="144">ERP</text>
+    <text x="906" y="144">web</text>
+  </g>
+  <g stroke="#8b96a3" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ai)">
+    <path d="M630,155 L718,180" fill="none"/>
+    <path d="M722,155 L772,166" fill="none"/>
+    <path d="M814,155 L800,192" fill="none"/>
+    <path d="M906,155 L836,200" fill="none"/>
+  </g>
+  <text x="906" y="176" text-anchor="middle" font-size="10.5" font-style="italic" fill="#6b7480">docked once</text>
+  <g stroke="#2f9e6b" stroke-width="1.8">
+    <line x1="734" y1="192" x2="786" y2="180"/>
+    <line x1="786" y1="180" x2="818" y2="210"/>
+    <line x1="818" y1="210" x2="760" y2="224"/>
+    <line x1="760" y1="224" x2="734" y2="192"/>
+  </g>
+  <g fill="#bfe6d2" stroke="#2f9e6b" stroke-width="1.8">
+    <circle cx="734" cy="192" r="13"/>
+    <circle cx="786" cy="180" r="13"/>
+    <circle cx="818" cy="210" r="13"/>
+    <circle cx="760" cy="224" r="13"/>
+  </g>
+  <text x="848" y="240" font-size="11.5" font-weight="bold" fill="#2f9e6b">Atlas</text>
+  <circle cx="640" cy="200" r="17" fill="#ffffff" stroke="#2f9e6b" stroke-width="1.8"/>
+  <text x="640" y="206" text-anchor="middle" font-size="16" font-weight="bold" fill="#2f9e6b">?</text>
+  <path d="M659,198 L714,194" fill="none" stroke="#2f9e6b" stroke-width="1.6" marker-end="url(#ag)"/>
+  <text x="768" y="262" text-anchor="middle" font-size="12" font-style="italic" fill="#3f6b55">one model, asked again and again</text>
+
+  <!-- ============ band 2 — the answer ============ -->
+  <text x="28" y="345" font-size="12" font-weight="bold" fill="#9aa4af">THE ANSWER</text>
+
+  <rect x="156" y="280" width="400" height="122" rx="12" fill="#eef2f5" stroke="#5b7c99" stroke-width="2"/>
+  <rect x="186" y="300" width="270" height="44" rx="14" fill="#ffffff" stroke="#5b7c99" stroke-width="1.8"/>
+  <path d="M204,344 L204,358 L220,344 Z" fill="#ffffff" stroke="#5b7c99" stroke-width="1.8" stroke-linejoin="round"/>
+  <text x="206" y="328" font-size="15" fill="#1f2933">Probably three.</text>
+  <text x="186" y="382" font-size="12" font-style="italic" fill="#6b7480">no source it could name — it read, then asserted</text>
+
+  <rect x="568" y="280" width="400" height="122" rx="12" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2"/>
+  <rect x="598" y="294" width="270" height="40" rx="14" fill="#ffffff" stroke="#2f9e6b" stroke-width="1.8"/>
+  <path d="M616,334 L616,348 L632,334 Z" fill="#ffffff" stroke="#2f9e6b" stroke-width="1.8" stroke-linejoin="round"/>
+  <text x="618" y="320" font-size="15" fill="#1f2933">Three.</text>
+  <g fill="#ffffff" stroke="#2f9e6b" stroke-width="1.5">
+    <rect x="598" y="352" width="132" height="22" rx="11"/>
+    <rect x="740" y="352" width="132" height="22" rx="11"/>
+  </g>
+  <g font-size="10.5" fill="#3f6b55" text-anchor="middle">
+    <text x="664" y="367">contract.pdf</text>
+    <text x="806" y="367">bill-04.eml</text>
+  </g>
+  <text x="598" y="392" font-size="12" font-style="italic" fill="#3f6b55">every answer names its source</text>
+
+  <!-- ============ band 3 — rights &amp; time ============ -->
+  <text x="28" y="479" font-size="12" font-weight="bold" fill="#9aa4af">RIGHTS &amp; TIME</text>
+
+  <rect x="156" y="414" width="400" height="122" rx="12" fill="#eef2f5" stroke="#5b7c99" stroke-width="2"/>
+  <g fill="none" stroke="#9aa4af" stroke-width="2" stroke-dasharray="4 3">
+    <rect x="184" y="442" width="28" height="22" rx="4"/>
+    <path d="M190,442 v-6 a8,8 0 0 1 16,0 v6"/>
+  </g>
+  <text x="226" y="458" font-size="12.5" fill="#1f2933">nothing to attach a grant to</text>
+  <g fill="none" stroke="#9aa4af" stroke-width="2" stroke-dasharray="4 3">
+    <circle cx="198" cy="500" r="12"/>
+  </g>
+  <path d="M198,493 L198,500 L204,504" fill="none" stroke="#9aa4af" stroke-width="2" stroke-linecap="round"/>
+  <text x="226" y="505" font-size="12.5" fill="#1f2933">each run discarded — nothing to replay</text>
+
+  <rect x="568" y="414" width="400" height="122" rx="12" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2"/>
+  <g fill="#bfe6d2" stroke="#2f9e6b" stroke-width="2">
+    <rect x="596" y="442" width="28" height="22" rx="4"/>
+  </g>
+  <path d="M602,442 v-6 a8,8 0 0 1 16,0 v6" fill="none" stroke="#2f9e6b" stroke-width="2"/>
+  <rect x="638" y="440" width="212" height="24" rx="12" fill="#ffffff" stroke="#2f9e6b" stroke-width="1.5"/>
+  <text x="744" y="456" text-anchor="middle" font-size="11" fill="#3f6b55">amount · customer_visible</text>
+  <line x1="598" y1="502" x2="936" y2="502" stroke="#b08d57" stroke-width="2"/>
+  <g stroke="#b08d57" stroke-width="2">
+    <line x1="632" y1="497" x2="632" y2="507"/>
+    <line x1="716" y1="497" x2="716" y2="507"/>
+    <line x1="800" y1="497" x2="800" y2="507"/>
+    <line x1="884" y1="497" x2="884" y2="507"/>
+  </g>
+  <circle cx="716" cy="502" r="8" fill="#e0b341" stroke="#1f2933" stroke-width="2"/>
+  <text x="716" y="524" text-anchor="middle" font-size="11" fill="#1f2933">as of March</text>
+  <text x="598" y="486" font-size="12.5" fill="#1f2933">rights sit on the model — and the past stays readable</text>
+
+  <text x="500" y="566" text-anchor="middle" font-size="13" font-style="italic" fill="#1f2933">The model builds the map once, instead of walking the terrain again on every question.</text>
+</svg>

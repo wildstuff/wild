@@ -1,0 +1,130 @@
+package wild:host-source@0.2.0;
+
+/// Read-only, operator-authorized access to an external host filesystem
+/// path, exposed so intake components can read a source **in place**
+/// instead of the host copying its bytes into the tribe workspace first
+/// (ADR-0079 — zero-copy host-source intake).
+///
+/// The capability is inert on its own: every verb resolves the target
+/// against a *mount* — an operator-authorized, tribe-scoped, read-only,
+/// ephemeral mapping `handle -> real host directory` the host registers
+/// at onboard time and tears down when the intake run ends. With no
+/// matching mount a call returns `no-mount`, so importing this interface
+/// grants nothing until the operator authorizes a concrete source.
+///
+/// Read-only by construction: there is deliberately no write or delete
+/// verb to omit-check.
+interface read {
+    /// One source item's origin facts — the provenance the legacy
+    /// copy path threw away (it replaced the file's mtime with the
+    /// dispatch time and dropped the original path entirely).
+    record source-meta {
+        /// Canonical host path of the item — the durable provenance
+        /// that flows on into the `wild:data` record.
+        uri: string,
+        size-bytes: u64,
+        /// Real last-modified time, ISO-8601, from the host's
+        /// filesystem metadata (NOT the onboard/dispatch time).
+        modified-at: string,
+        /// SHA-256 hex of the bytes — the provenance a consumer
+        /// attaches to the ingested record. The host leaves it empty
+        /// (mirroring `wild:files/types.file-meta.digest` in V1): only
+        /// a consumer doing a full `read` holds all the bytes, so it
+        /// computes the digest there. Empty from `list` / `stat`.
+        digest: string,
+        /// Best-effort MIME guess from the extension.
+        mime: string,
+    }
+
+    /// Typed failure vocabulary — every case is a deliberate, named
+    /// outcome, never a silent partial result.
+    variant source-error {
+        /// The handle / uri resolves under no authorized mount for
+        /// this tribe (the cap is inert without one).
+        no-mount,
+        /// The resolved path escapes the mount root after
+        /// canonicalisation (`..` / planted symlink).
+        outside-jail,
+        /// The file changed underneath the read (e.g. truncated below
+        /// the requested offset) — fail loud, never half-read.
+        source-changed,
+        not-found,
+        /// ADR-0227 — the OS refused the read. Its own case because it is the
+        /// one filesystem failure a RETRY can never fix and an OPERATOR can:
+        /// a sandboxed app reading outside its granted scope gets this, and
+        /// the remedy is a permission granted once.
+        ///
+        /// Folded into `io` before, so every layer above had to guess it back
+        /// out of a message — and guessed wrong, because macOS reports a
+        /// sandbox refusal as EPERM ("Operation not permitted"), which reads
+        /// like neither "permission" nor "denied".
+        permission-denied(string),
+        io(string),
+    }
+
+    /// List the items directly under (or, when `recursive`, anywhere
+    /// beneath) a mount handle. Each item carries its origin facts;
+    /// no bytes are read.
+    %list: func(mount: string, recursive: bool) -> result<list<source-meta>, source-error>;
+
+    /// Read a byte range of one item, addressed by its canonical
+    /// `uri` (as returned by `list`). `len = 0` means "to EOF" and is
+    /// the only path that computes `digest`. A non-zero `len` reads a
+    /// head/slice — the zero-copy sampling primitive that never
+    /// materialises the whole file. Returns the bytes only; pair with
+    /// `stat` for metadata.
+    read: func(uri: string, offset: u64, len: u64) -> result<list<u8>, source-error>;
+
+    /// Metadata only, no bytes — the change-guard primitive: a
+    /// consumer compares `size-bytes` / `modified-at` between enumerate
+    /// and decode to detect a mid-run swap before ingesting.
+    stat: func(uri: string) -> result<source-meta, source-error>;
+}
+
+/// ADR-0100 — native component-model-async streaming READ. Where
+/// `read.read` returns a source item's whole contents as one `list<u8>`
+/// (a by-value transfer ceiling that materialises the entire file in guest
+/// AND host memory before it crosses the boundary), `read-stream` hands the
+/// bytes back as a `stream<u8>` the consumer drains with native
+/// backpressure — no whole-file materialisation across the boundary, so a
+/// large source item (a multi-hundred-MiB CSV, a scanned-document corpus)
+/// is decodable in place.
+///
+/// `async func` because the host constructs the stream with store access
+/// and the guest drains it asynchronously; it requires a wit-bindgen 0.58
+/// consumer + the component-model-async ABI. SPLIT OUT of `read`'s sync
+/// verbs on purpose *by keyword* (not file): every current `wild:host-source`
+/// consumer is on wit-bindgen 0.58, and the package is not forge-vendored,
+/// so no 0.35/cargo-component path needs a sync-only slice (contrast the
+/// two-file split `wild:blobs`/`wild:files` carry for the forge).
+///
+/// The host PUMPS the file in 64 KiB chunks as the guest pulls (ADR-0100 true
+/// pump) — the whole file never materialises in host OR guest memory, so a
+/// multi-hundred-MiB source is read in place with no ceiling on either side.
+/// Mirrors `wild:files/reader.read-stream`.
+interface reader {
+    use read.{source-meta, source-error};
+
+    /// Stream a source item's full bytes in place, addressed by its
+    /// canonical `uri` (as returned by `list`). Reads to EOF. On the error
+    /// path the string carries the underlying `source-error` detail
+    /// (`no-mount` / `outside-jail` / `source-changed` / `not-found` / `io`);
+    /// the typed change-guard stays on `stat`, which a consumer calls
+    /// before the stream to detect a mid-run swap.
+    read-stream: async func(uri: string) -> result<stream<u8>, string>;
+
+    /// ADR-0100 — STREAMING enumerate: the lazy sibling of `read.list`. Where
+    /// `list` returns EVERY item as one by-value `list<source-meta>` (the whole
+    /// folder listing materialised in guest AND host memory — a ceiling for a
+    /// folder with tens of thousands of files), `list-stream` yields each item's
+    /// `source-meta` through a `stream<source-meta>` the consumer drains with
+    /// native backpressure, so the host walks the mount holding at most
+    /// O(directory-depth) state — an arbitrarily large folder enumerates in
+    /// bounded memory. `async func` because the host constructs the stream with
+    /// store access. Yields in filesystem `readdir` order (UNSORTED — a global
+    /// sort would re-buffer the whole listing and defeat the memory bound; the
+    /// intake runner fans out per item, so order does not matter). The typed
+    /// `source-error` reports only up-front failures (no-mount / not-found); a
+    /// mid-walk I/O error terminates the stream.
+    list-stream: async func(mount: string, recursive: bool) -> result<stream<source-meta>, source-error>;
+}

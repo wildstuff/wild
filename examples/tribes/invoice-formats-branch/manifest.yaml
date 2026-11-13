@@ -1,0 +1,27 @@
+# `wild tribe apply <bundle> --as <id>` reads this. Schema:
+# `crates/runtime/wild-tribe-ops/src/bundle.rs::BundleManifest`.
+#
+# ADR-0123 Phase 1.5 example: one DOCUMENT source accepts both PDF and plain
+# text files. A `processes:` flow routes each file to its own `does: extract`
+# branch via `when: format = '...'` edges; the per-branch `config` carries a
+# distinct `custom_instruction`. The built-in `extract-worker` (read with the
+# profile's LLM, so a model must be configured) receives that instruction with
+# each file.
+schema_version: "1"
+
+name: invoice-formats-branch
+description: >-
+  End-to-end example for per-format branch routing: PDF and TXT files dropped
+  into one folder source are routed to format-specific extract branches, each
+  carrying its own tuning config.
+
+parent_tribe: root
+
+authoring_method: ddd
+
+# The worker ships with the product; the manifest declares it so `tribe apply`
+# refuses early, naming it, on a profile that cannot deploy it.
+external_components:
+  - extract-worker
+
+workers: []

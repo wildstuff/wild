@@ -1,0 +1,23 @@
+{
+  "$defs": {
+    "BatchId": {
+      "description": "A batch's id: the lowercase hex SHA-256 of its decoded body.",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The status route's request: the ids to report on.",
+  "properties": {
+    "ids": {
+      "items": {
+        "$ref": "#/$defs/BatchId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "ids"
+  ],
+  "title": "StatusRequest",
+  "type": "object"
+}
