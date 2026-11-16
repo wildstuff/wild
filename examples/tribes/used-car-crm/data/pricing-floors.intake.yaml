@@ -1,0 +1,4 @@
+# Auto-intake: columns map 1:1 onto the `pricing_floor` type's fields.
+target_type: pricing_floor
+key: [vehicle_id]
+columns: [vehicle_id, min_price_eur, note]

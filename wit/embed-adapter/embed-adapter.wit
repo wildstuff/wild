@@ -1,0 +1,129 @@
+// WILD Embed-Adapter Interface
+//
+// The Tier-2 component contract for text → embedding-vector adapters.
+// Sister contract to `wild:llm-adapter` (chat-LLMs): modality-precise
+// by design — operators install one OCI image per modality, not "one
+// AI image" (see the `WildAiPlugin` doc-comment). Implemented by:
+// ollama (`nomic-embed-text`), or any OpenAI-compatible embeddings
+// provider.
+//
+// Mirrors `wild:llm-adapter`'s `interface chat` 1:1 in shape (two-bucket
+// `embed-error`, `adapter-info` + `info()`, the `*-plugin` / `*-host`
+// world split) MINUS streaming — embeddings return as one aggregated
+// batch, so there is no `chat-stream` sibling and no streaming world.
+
+package wild:embed-adapter@0.1.0;
+
+interface embed {
+
+    /// Token usage when the provider reports it. Mirror of
+    /// `wild:ai@0.4.0::token-usage` / `wild:llm-adapter::token-usage`.
+    /// Local adapters (Ollama) report zeros.
+    record token-usage {
+        input-tokens: u32,
+        output-tokens: u32,
+        cache-read-input-tokens: u32,
+        cache-creation-input-tokens: u32,
+    }
+
+    /// A batch embed request — `input` is a batch (one round-trip
+    /// embeds many strings); a single-string embed is a one-element
+    /// list. `embed-response.embeddings` is index-aligned to it.
+    ///
+    /// NOTE — no `caller-context` here, exactly as `wild:llm-adapter`'s
+    /// `chat-request` omits it: the Tier-2 component never sees tribe
+    /// identity. The host shim owns tenant scoping + lock refresh from
+    /// the `wild:ai/embed` caller-context, separately from the bytes the
+    /// adapter sends upstream.
+    record embed-request {
+        /// Texts to embed, in order.
+        input: list<string>,
+        /// Provider model id (e.g. `nomic-embed-text`).
+        model: string,
+        /// Requested output dimensionality (Matryoshka / dimension
+        /// truncation). None = the model's native dim.
+        dimensions: option<u32>,
+        /// Truncate over-long inputs instead of erroring. None =
+        /// adapter default.
+        truncate: option<bool>,
+    }
+
+    /// Batch embed response. `embeddings` is index-aligned to the
+    /// request's `input`; every inner list has length `dims`.
+    record embed-response {
+        embeddings: list<list<f32>>,
+        model: string,
+        usage: token-usage,
+        dims: u32,
+    }
+
+    /// Two-bucket error — the same retryable/permanent split as
+    /// `wild:llm-adapter`'s `chat-error`. Connection-refused / 5xx /
+    /// rate-limit → retryable; bad model / malformed input / 4xx →
+    /// permanent.
+    variant embed-error {
+        retryable(string),
+        permanent(string),
+    }
+
+    /// Adapter capability profile — mirror of `wild:llm-adapter`'s
+    /// `adapter-info`, trimmed to the embed-relevant fields. Pure
+    /// static call; the host shim caches it at registration.
+    /// Additive within 0.1.0: new fields default conservative
+    /// (false / 0 / empty).
+    record adapter-info {
+        /// Adapter slug — matches the wasm-component package name
+        /// (`ollama-embed`, `openai-embed`). Telemetry tag.
+        name: string,
+        /// Adapter-component semver.
+        version: string,
+        /// Upstream provider family: "openai" | "local" | "other".
+        /// Free-form (not enum) so a new provider needs no WIT change.
+        provider-family: string,
+        /// Native output dimensionality the model produces. 0 =
+        /// unknown (caller reads `dims` off the response).
+        max-dimensions: u32,
+        /// Adapter honours `embed-request.dimensions`. False = always
+        /// emits at the native dim regardless of the request.
+        supports-dimensions: bool,
+        /// Max inputs per batch the upstream accepts in one call.
+        /// 0 = unknown / unbounded.
+        max-batch-size: u32,
+    }
+
+    /// Return the adapter's capability profile. Pure static call —
+    /// adapters MUST return the same value every time within a process.
+    info: func() -> adapter-info;
+
+    /// The single embed call. Synchronous; no streaming sibling
+    /// (unlike `wild:llm-adapter`).
+    embed: func(request: embed-request) -> result<embed-response, embed-error>;
+}
+
+/// World every Tier-2 embed-adapter component implements. Inherits
+/// `wild:plugin-meta/plugin-base@0.3.0` (the meta lifecycle the
+/// `ComponentBackedHostPlugin` shim drives) and adds the typical
+/// Tier-2 imports + the embed export:
+///   - `wild:secrets/store` — read the api-key alias (None for local
+///     Ollama, which needs no key).
+///   - `wild:http/outbound` — the GOVERNED HTTP call (ADR-0090): the
+///     host owns the socket, enforces the default-deny `egress.yaml`
+///     (a local endpoint like Ollama needs an `allow_private`
+///     destination), injects credentials by reference, and audits every
+///     call. Migrated from raw `wasi:http/outgoing-handler@0.2.0`.
+world embed-adapter-plugin {
+    include wild:plugin-meta/plugin-base@0.3.0;
+    import wild:secrets/store@0.1.0;
+    import wild:http/outbound@0.1.0;
+    export embed;
+}
+
+/// Host-side bindgen target. The `EmbedAdapterShim` in
+/// `wild-host/src/embed_adapter_shim.rs` generates against this world
+/// to call into a guest's exported `embed` interface without dragging
+/// in the guest-side imports (those are wired by the shim's
+/// `LinkerSeed` separately). Mirror of `wild:llm-adapter`'s
+/// `llm-adapter-host`.
+world embed-adapter-host {
+    export embed;
+}

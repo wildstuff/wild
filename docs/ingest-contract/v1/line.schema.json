@@ -1,0 +1,26 @@
+{
+  "$defs": {
+    "ShapeRef": {
+      "description": "A shape's name and version, `name@version`.",
+      "pattern": "^[a-z0-9_]+@[0-9]+$",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One line of a batch.",
+  "properties": {
+    "record": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "shape": {
+      "$ref": "#/$defs/ShapeRef"
+    }
+  },
+  "required": [
+    "shape",
+    "record"
+  ],
+  "title": "Line",
+  "type": "object"
+}

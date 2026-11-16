@@ -1,0 +1,44 @@
+# `wild tribe apply <bundle> --as <id>` reads this. Schema:
+# `crates/runtime/wild-tribe-ops/src/bundle.rs::BundleManifest`.
+#
+# The USED-CAR DEALERSHIP CRM — the reference tribe for the goal-statement
+# walk (`specs/goal-statement.md`): inventory synced from a mobile.de export
+# every 30 minutes, customer inquiries + viewing appointments, and every price
+# negotiation routed to the owner's inbox. Distilled from a production system;
+# see README.md for what stays outside the bundle (live WhatsApp channel, live
+# Seller-API binding) and why.
+schema_version: "1"
+
+name: used-car-crm
+
+# ADR-0108 — this bundle authors its ontology as a DDD domain model. `apply`
+# compiles `ontology/model.yaml` into the value objects / value sets /
+# aggregates / projections / verbs / source bindings the runtime needs.
+authoring_method: ddd
+
+description: >
+  A used-car dealership CRM, authored as a DDD domain model. It mirrors the
+  vehicle stock from a mobile.de export every 30 minutes, tracks customers,
+  inquiries and viewing appointments (the calendar surface), and routes every
+  customer price offer to the owner's inbox — accepted offers become deals,
+  and the internal price floor never reaches a customer surface.
+
+parent_tribe: root
+
+# Daily reflection at 18:00 — the chief summarises the day (new inquiries,
+# tomorrow's viewings, offers waiting in the inbox, listings going stale) and
+# flags drift. The RECURRING inventory sync is a Chief-free `intake_source`
+# (the model's `mobile-de-inventory` binding) — the chief does NOT wake per
+# sync; it wakes to reflect and to act.
+schedule_reflect: "0 18 * * *"
+
+# No `default_model:` — the chief routes to your configured default LLM adapter
+# at dispatch, so this bundle applies cleanly regardless of LLM setup.
+
+# One GENERIC ai-worker, configured by prompt + tool grant (no core code),
+# wired by the model's `inquiry-triage` process (ADR-0118 D14):
+#   - inquiry-triage — reacts to every new inquiry: links the customer record,
+#     matches the vehicle when one is named, moves the lead funnel state.
+#     Atlas tools only, no egress → it completes with no secret required.
+workers:
+  - ref: workers/inquiry-triage.md

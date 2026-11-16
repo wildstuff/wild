@@ -1,0 +1,16 @@
+recipe_id,name,servings,kcal_per_serving,protein_g,carbs_g,fat_g,meal,goal_type,gender_suitability,source_url,recorded_on
+overnight-oats,Overnight oats with berries,1,350,14,52,9,breakfast,maintenance,any,https://fdc.nal.usda.gov,2026-07-01
+chicken-rice-bowl,Chicken and rice bowl,1,550,42,60,12,lunch,surplus,any,https://fdc.nal.usda.gov,2026-07-01
+greek-yogurt-berries,Greek yogurt with berries,1,180,17,22,3,snack,deficit,any,https://fdc.nal.usda.gov,2026-07-01
+salmon-sweet-potato,Salmon with sweet potato,1,520,38,45,18,dinner,maintenance,any,https://fdc.nal.usda.gov,2026-07-01
+lentil-soup,Lentil soup,1,380,22,58,7,dinner,deficit,any,https://fdc.nal.usda.gov,2026-07-01
+protein-shake-banana,Protein shake with banana,1,300,30,34,6,snack,surplus,any,https://fdc.nal.usda.gov,2026-07-01
+veggie-stir-fry,Vegetable stir-fry with tofu,2,320,18,30,14,dinner,deficit,any,https://fdc.nal.usda.gov,2026-07-02
+turkey-wrap,Turkey and avocado wrap,1,420,32,38,16,lunch,maintenance,any,https://fdc.nal.usda.gov,2026-07-02
+egg-omelette,Three-egg vegetable omelette,1,340,24,6,24,breakfast,maintenance,any,https://fdc.nal.usda.gov,2026-07-02
+tuna-pasta,Tuna pasta bake,2,480,34,55,12,dinner,surplus,any,https://fdc.nal.usda.gov,2026-07-02
+quinoa-salad,Quinoa and chickpea salad,2,410,16,52,14,lunch,maintenance,any,https://fdc.nal.usda.gov,2026-07-02
+beef-chili,Beef chili con carne,4,450,32,40,16,dinner,surplus,any,https://fdc.nal.usda.gov,2026-07-02
+smoothie-bowl,Berry protein smoothie bowl,1,330,24,44,6,breakfast,deficit,any,https://fdc.nal.usda.gov,2026-07-02
+cottage-toast,Cottage cheese on wholemeal toast,1,280,22,30,7,snack,deficit,any,https://fdc.nal.usda.gov,2026-07-02
+shrimp-noodles,Shrimp and vegetable noodles,1,440,30,52,10,dinner,maintenance,any,https://fdc.nal.usda.gov,2026-07-02

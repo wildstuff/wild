@@ -1,0 +1,39 @@
+// `annotate-worker` — the minimal WORKLOAD-flavor Tier-2 plugin.
+//
+// The teaching example for the worker contract: the host wakes the
+// component once per NATS message on the sidecar-declared subscription
+// (`wild.{tribe}.worker.{agent-name}.task`), the component does a small
+// DETERMINISTIC transformation of the task payload (annotate + uppercase
+// the prompt — no LLM, no external services), and publishes a worker
+// result event back on the task's `result_subject`.
+//
+// Shape:
+//
+//   - `include wild:plugin-meta/plugin-base` — every Tier-2 plugin
+//     exports the three lifecycle calls (`manifest`, `init`,
+//     `shutdown`); the host cross-checks `manifest()` against the
+//     sidecar at load time (ADR-0045 §5).
+//   - `export wild:worker/handler` — the installable worker primitive
+//     (ADR-0141). There is no arbitrary export the host calls; a
+//     workload is driven by a delivered message. The host probes for
+//     this export and invokes `handle-message` once per task.
+//   - `export wild:worker/meta` — optional trigger discovery, so a
+//     dashboard can render this worker's choosable triggers without
+//     hard-coding them.
+//   - `import wild:messaging/consumer` — the outcome publish. The one
+//     capability this worker needs; the sidecar's `worker.bus.basic`
+//     bundle grants the matching subjects.
+
+package wildstuff:annotate-worker@0.1.0;
+
+world annotate-worker {
+    // ── Plugin contract — lifecycle (manifest / init / shutdown) ──
+    include wild:plugin-meta/plugin-base@0.3.0;
+
+    // ── Messaging: publish the result event ──
+    import wild:messaging/consumer@0.3.0;
+
+    // ── Wake-up entry point + trigger discovery ──
+    export wild:worker/handler@0.1.0;
+    export wild:worker/meta@0.1.0;
+}
