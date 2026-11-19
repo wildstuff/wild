@@ -1,0 +1,33 @@
+// WILD Events Interface
+// Outgoing publish for cross-tribe events.
+//
+// INCOMING events are NOT delivered through this interface. Components
+// are awoken by `wild:messaging/handler` when a subject they're
+// subscribed to (declared in the rendered `Plan`'s messaging links)
+// receives a message. The orchestrator reads `trigger.kind = "event"`
+// from its wake-trigger payload to know it was woken by a cross-org
+// event and which topic.
+//
+// The wild:registry package handles discovery (who offers what,
+// who needs what); this package is purely the publish side.
+
+package wild:events@0.1.0;
+
+interface publish {
+
+    record event {
+        /// Topic in dot-segmented kebab-case
+        /// (e.g., "competitor.price-change"). The provider prepends
+        /// "wild.events." when publishing on NATS.
+        topic: string,
+        /// Event payload as JSON string
+        data: string,
+        /// Source tribe ID
+        source: string,
+    }
+
+    /// Publish a cross-tribe event. Subscribers are wired up via
+    /// the rendered `Plan`'s messaging links (declared in their
+    /// blueprint's ## Needs section).
+    publish: func(event: event) -> result<_, string>;
+}

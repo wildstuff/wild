@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A new epoch for a producer's `live` records: a random 128-bit value as 32\nlowercase hex digits, never a counter, so a daemon restored from a backup can\nnever hand out an epoch it issued before.",
+  "properties": {
+    "epoch": {
+      "pattern": "^[0-9a-f]{32}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "epoch"
+  ],
+  "title": "Epoch",
+  "type": "object"
+}

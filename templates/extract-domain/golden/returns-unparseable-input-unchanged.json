@@ -1,0 +1,10 @@
+{
+  "tool": "extract_domain",
+  "input": {
+    "url": "not-a-url"
+  },
+  "expected": {
+    "domain": "not-a-url"
+  },
+  "match": "exact"
+}

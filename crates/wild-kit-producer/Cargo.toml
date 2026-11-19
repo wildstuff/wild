@@ -1,0 +1,36 @@
+# wild-kit — the producer half of the kit, as a library an outside developer
+# builds a producer against (ADR-0398 D10, amended).
+#
+# It speaks the ingest door's contract and nothing else of Wild's: the only
+# `wild-*` crate in its tree is `wild-ingest-contract` (the test
+# `tests/integration/dependency_rule.rs` holds that). The conformance binary that serves a
+# door lives in `crates/wild-kit` (package `wild-kit-cli`, bin `wild-kit`).
+#
+# MIT OR Apache-2.0: the producer side of a contract a third party builds
+# against (ADR-0225 D6 contract tier).
+[package]
+name         = "wild-kit"
+version      = "0.1.3"
+edition      = { workspace = true }
+rust-version = "1.85"
+license      = "MIT OR Apache-2.0"
+repository   = "https://github.com/wildstuff/wild"
+description  = "wild — the producer half of the kit: a Rust client for Wild's producer ingest door (pairing, pinned TLS, calls, MCP view)."
+readme       = "README.md"
+keywords     = ["wild", "ingest", "producer", "client", "mcp"]
+categories   = ["api-bindings", "network-programming"]
+exclude = ["tests/"] # the tests check the workspace tree and use its fixtures; they cannot run outside the repo
+
+[lib]
+name = "wild_kit"
+path = "src/lib.rs"
+
+[dependencies]
+wild-ingest-contract = { workspace = true }
+serde                = { workspace = true }
+serde_json           = { workspace = true }
+rustls               = { workspace = true, features = ["std"] }
+sha2                 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

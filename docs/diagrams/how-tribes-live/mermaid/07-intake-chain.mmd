@@ -1,0 +1,8 @@
+flowchart LR
+    S["Source<br/>(doc · feed · export)"] --> E["Extract<br/>parse to rows"]
+    E --> R["Resolve<br/>dedup variants"]
+    R --> C{"Confirm<br/>uncertain?"}
+    C -->|"yes"| Op["ask the operator"]
+    C -->|"no"| G["Govern<br/>stamp provenance"]
+    Op --> G
+    G --> Know[("structured,<br/>queryable knowledge")]
