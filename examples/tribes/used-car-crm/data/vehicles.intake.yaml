@@ -1,0 +1,6 @@
+# Auto-intake: columns map 1:1 onto the `vehicle` type's fields. (The
+# RECURRING sync maps the export's `ad_id`/`model` headers via the source's
+# extractor; this STARTER seed already uses the field names.)
+target_type: vehicle
+key: [vehicle_id]
+columns: [vehicle_id, make, model_name, first_registration, mileage_km, price_eur, fuel, gearbox, color, status, listed_on]

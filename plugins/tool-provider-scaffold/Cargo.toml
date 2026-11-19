@@ -1,0 +1,34 @@
+# Standalone — a `macro_rules!`-only support crate consumed by the
+# Tier-2 tool-provider plugins via a `path` dependency. Each plugin is
+# its own standalone workspace, so this crate is too (it is never built
+# directly — it expands inside each plugin's wasm build).
+[workspace]
+
+[package]
+name = "tool-provider-scaffold"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Declarative macros that generate the boilerplate Tier-2 wild:tool-provider plugin surface (Component + ToolsGuest/MetaGuest + export!), so each connector/adapter declares only what varies."
+
+[lib]
+# Pure `macro_rules!` — no runtime code, no proc-macro. Compiles into
+# each consuming wasm plugin's build like any rlib dependency.
+path = "src/lib.rs"
+
+# Deliberately NO wild-core dependency, not even for tests. The
+# `connector_fault` / `classified_error` forms name `wild_core::…` in their
+# EXPANSION, so the dependency belongs to the call site (ADR-0227 OQ1) —
+# the connectors that expand those forms already carry it. Keeping this
+# manifest free of path-deps into `crates/` is what lets the public copy of
+# this crate (it ships to the distribution repo, where `crates/` does not
+# exist) build and `cargo test` standalone. The fault-form expansion tests
+# live with a consumer that owns the dependency:
+# `plugins/tools/folder-connector/src/scaffold_fault_forms_tests.rs`.
+
+[dev-dependencies]
+# Test-only: the enumerate-schema tests parse the macro's output, so a
+# missing comma between the canonical keys and a connector's extras fails
+# here instead of in every consuming plugin's build.
+serde_json = "1"

@@ -1,0 +1,7 @@
+# Intake mapping for the dunnings seed.
+# `dunning` is key_strategy: uuid (autokey). Each seed row carries an explicit
+# `id` in its body, so the Upsert PROMOTES it (ADR-0082 promote-not-discard)
+# instead of minting — runtime `dun_invoice` writes omit the id and mint.
+target_type: dunning
+key: [id]
+columns: [id, invoice_id, partner_id, level, sent_date, amount, status]

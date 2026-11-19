@@ -1,0 +1,57 @@
+# `wild tribe apply <bundle> --as <id>` reads this. Schema:
+# `crates/common/src/bundle.rs::BundleManifest`.
+#
+# This bundle is a DEPLOYABLE tribe: the manifest deploys a live chief — the
+# calorie coach that uses `web-search` to look up nutrition/exercise data and
+# writes records via the verbs. (The liquidity example is the richer deployable
+# reference; this one is the minimal deployable shape.) The ontology + seed data
+# load the same way whether or not a manifest is present.
+schema_version: "1"
+
+# ADR-0108 — this bundle authors its ontology as a DDD domain model. `apply`
+# routes through `wild_ddd::compiler::compile`, which lowers `ontology/model.yaml`
+# into the value objects / functions / aggregates / projections / verbs / source
+# bindings the runtime needs. There is no legacy `seeds.yaml` / `verbs/` here.
+authoring_method: ddd
+
+name: fitness-tracker
+
+description: >
+  A calorie-balance coach. Tracks food intake (calories in) over a food
+  reference table and workouts (calories out) over an exercise table, computes
+  the rolling net energy balance, and uses web-search to look up nutrition +
+  burn-rate data for items not yet in the reference tables.
+
+parent_tribe: root
+
+# NO tribe-level intake `schedule:` — ADR-0086 moved the recurring web crawl off
+# the per-30-min LLM Chief wake onto a declared, Chief-free `intake_source` (the
+# `fitness-web-search` source binding in `ontology/model.yaml`, an `interval`
+# trigger the DDD compiler lowers into the `intake_source` registry). The
+# scheduler fires that source directly (48 LLM cycles/day → 0); the Chief wakes
+# only to CHANGE the query or CURATE the staged hits, per specs/onboarding.md
+# § "Scheduled crawling".
+
+# Daily reflection at 20:00 — the chief summarises the day's energy balance
+# (in − out vs. the goal) and flags streaks / drift. See docs/cycle-schedules.md
+# for the other cadence fields.
+schedule_reflect: "0 20 * * *"
+
+# No `default_model:` — the chief routes to your configured default LLM adapter
+# at dispatch, so this bundle applies cleanly regardless of LLM setup. Pin one
+# with `default_model: <id>` (an id from `wild config llm list`) if you want.
+
+# Chief-only: an empty worker list still deploys the default chief, which has
+# the web-search / web-connector / data tools. Add `{ ref: workers/<x>.yaml }`
+# to fan out to a dedicated worker.
+workers: []
+
+# NO `deny_tools` — ADR-0086 source-governance migration. The old list denied
+# `url-fetch` / `url-enumerate` TRIBE-WIDE to force the chief to delegate bulk
+# fetching. But a tribe-wide deny also blocks the intake-runner WORKER that the
+# Chief-free `intake_source` now dispatches to (it is the worker that runs
+# `url-fetch`). It is also redundant: `url-fetch` / `url-enumerate` are
+# effect-class tools (`common::tool_class`), so the effect gate's CATEGORICAL
+# chief-delegation rule already refuses them to the chief INLINE (forcing a
+# worker), with NO policy file and WITHOUT blocking the worker. Keeping the
+# delegation steer, dropping the blunt instrument.

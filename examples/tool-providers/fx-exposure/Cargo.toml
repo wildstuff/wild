@@ -1,0 +1,40 @@
+# ADR-0202 D5 — the `fx_exposure` Procedure. NOT a member of the
+# host workspace; built as a wasm32-wasip2 component so the forge lane can
+# produce it and the host can load it as a Tier-2 plugin.
+#
+# Deliberately dependency-light: a fitted model carries its parameters, so
+# it needs no clock, no network and no lake read. That is what keeps it
+# inside the ADR-0202 D10.3 determinism profile — see README.
+[workspace]
+
+[package]
+name         = "fx-exposure"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.97.0"
+license      = "Apache-2.0"
+repository   = "https://github.com/wildstuff/the-wild"
+description  = "ADR-0202 D5 foreign-currency exposure valuation — the two-axis Procedure, anchored to a rate snapshot"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "=0.58.0", features = ["async-spawn"] }
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+
+# Wasm components are single-threaded; no tokio.
+
+[package.metadata.component]
+package = "wildstuff:fx-exposure"
+
+[package.metadata.component.target]
+path  = "wit"
+world = "fx-exposure"
+
+# Canonical-source WIT deps under the monorepo `wit/` tree.
+[package.metadata.component.target.dependencies]
+"wild:plugin-meta"   = { path = "../../../wit/plugin-meta/plugin-meta.wit" }
+"wild:tool-provider" = { path = "../../../wit/tool-provider/tool-provider.wit" }
+"wild:function"      = { path = "../../../wit/function/function.wit" }
