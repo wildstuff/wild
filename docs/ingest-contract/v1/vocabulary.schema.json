@@ -1,0 +1,44 @@
+{
+  "$defs": {
+    "VocabularyEntry": {
+      "description": "One entry of the vocabulary: a project's or a customer's key and name. A\ntitle match resolves to the key a reference field carries.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "target_type": {
+          "description": "The type the key belongs to, e.g. `Kunde`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "name",
+        "target_type"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The vocabulary an approved device receives, scoped to its person.",
+  "properties": {
+    "entries": {
+      "items": {
+        "$ref": "#/$defs/VocabularyEntry"
+      },
+      "type": "array"
+    },
+    "etag": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "etag",
+    "entries"
+  ],
+  "title": "Vocabulary",
+  "type": "object"
+}

@@ -1,0 +1,80 @@
+{
+  "$defs": {
+    "AnnouncementState": {
+      "description": "Where an announcement stands.",
+      "oneOf": [
+        {
+          "const": "pending",
+          "description": "Shown dashed in the atlas, waiting for the operator's answer.",
+          "type": "string"
+        },
+        {
+          "const": "activated",
+          "description": "Activated: the poll carries the producer key and first epoch once.",
+          "type": "string"
+        },
+        {
+          "const": "rejected",
+          "description": "The operator declined it.",
+          "type": "string"
+        },
+        {
+          "const": "revoked",
+          "description": "The operator cut this device off: its key no longer opens the door,\nand one it never fetched is never handed over. Terminal: stop polling\nand stop sending; only a new announcement the operator lets in again\npairs this install anew.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "A state this contract version does not know. Keep polling.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "An announcement's state, as its poll reports it. `producer_key` and\n`epoch` are present exactly once, on the first poll after activation.",
+  "properties": {
+    "announcement": {
+      "type": "string"
+    },
+    "device": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "epoch": {
+      "pattern": "^[0-9a-f]{32}$",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "producer_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "profile": {
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/AnnouncementState"
+    },
+    "tribe": {
+      "description": "The tribe the operator placed the producer in when saying yes, on\nevery poll from then on: the `{tribe}` of each route the key opens.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "announcement",
+    "profile",
+    "state"
+  ],
+  "title": "AnnouncementStatus",
+  "type": "object"
+}

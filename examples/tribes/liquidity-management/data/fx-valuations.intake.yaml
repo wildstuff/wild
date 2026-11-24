@@ -1,0 +1,19 @@
+# Intake mapping for the ADR-0202 D5 fx valuation seed.
+#
+# It exists because a `data/*.csv` is matched to a target type by the
+# FINGERPRINT of its header, and that fingerprint is only registered by an
+# `.intake.yaml` beside it. A CSV without this file is skipped with a warning
+# and the tribe deploys green around the hole.
+target_type: fx_valuation
+# ALL THREE key parts. The snapshot is part of the identity: re-valuing the
+# same invoice tomorrow at tomorrow's rate must write a NEW row, or "what was
+# it worth when we reported it" has no answer. A partial key here would
+# overwrite yesterday's valuation and lose exactly that.
+key: [invoice_id, procedure_version, rate_date]
+# The exact CSV header, and NOTE what is absent: every field the Procedure
+# answers — `expected_eur`, the two band ends, `band_pct`, `valuation_basis`,
+# `anchored_to_rate_date`. The seed ships the QUESTION (which invoice, in what
+# currency, how much, against which rate of which day, how far ahead) and the
+# Procedure fills the answer at the ingest boundary. Adding any of those
+# columns would mean the seed answered its own question.
+columns: [invoice_id, currency, amount_foreign, rate_per_eur, rate_date, days_to_settlement, procedure_version]

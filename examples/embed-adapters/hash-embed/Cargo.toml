@@ -1,0 +1,58 @@
+# Deterministic teaching adapter for `wild:embed-adapter@0.1.0` — the
+# copy-paste starting point for a Tier-2 embed-adapter component. No
+# network, no secrets: the vector is a hashed bag-of-words derived from
+# the input text itself (real, l2-normalized f32 vectors), so the full
+# contract (the batch embed call + the meta lifecycle) can be exercised
+# without any upstream provider.
+#
+# Standalone — explicitly NOT a member of the wild workspace (the
+# wasm32-wasip2 target would otherwise pull host-target deps into the
+# embedded host's build). Empty `[workspace]` table tells cargo this
+# manifest defines its own (single-member) workspace.
+
+[workspace]
+
+[package]
+name         = "hash-embed"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.97.0"
+license      = "Apache-2.0"
+repository   = "https://github.com/wildstuff/the-wild"
+description  = "Deterministic hashed bag-of-words adapter teaching the wild:embed-adapter@0.1.0 Tier-2 contract — no network, no secrets"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# No `async-spawn` feature: the embed contract has no streaming sibling
+# and `wild:http/outbound`'s buffered `fetch` is a plain sync func, so
+# nothing here needs wit-bindgen's component-model-async runtime (the
+# LLM-adapter sibling `echo-llm` needs it for `chat-stream-native`).
+wit-bindgen = "=0.58.0"
+
+# Wasm components are single-threaded; no tokio.
+
+[package.metadata.component]
+package = "wildstuff:hash-embed"
+
+[package.metadata.component.target]
+path  = "wit"
+world = "hash-embed"
+
+# WIT-package deps for the world's imports + exports. Path deps straight
+# at the canonical text-WIT under `wit/<pkg>/`. The wit-bindgen macro
+# ALSO reads `wit/deps/<name>/` next to `wit/world.wit` (checked-in
+# symlinks resolving to the same files), so both surfaces have to
+# agree — see ./wit/deps/.
+[package.metadata.component.target.dependencies]
+"wild:plugin-meta"   = { path = "../../../wit/plugin-meta/plugin-meta.wit" }
+"wild:embed-adapter" = { path = "../../../wit/embed-adapter" }
+"wild:secrets"       = { path = "../../../wit/secrets/secrets.wit" }
+"wild:http"          = { path = "../../../wit/http" }
+
+[profile.release]
+opt-level     = "z"
+lto           = true
+strip         = true
+codegen-units = 1

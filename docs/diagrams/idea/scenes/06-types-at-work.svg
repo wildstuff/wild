@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="620" viewBox="0 0 1000 620" font-family="'Chalkboard SE','Comic Sans MS','Segoe Print',sans-serif">
+  <rect width="1000" height="620" rx="18" fill="#fbfaf7"/>
+  <text x="500" y="46" text-anchor="middle" font-size="27" font-weight="bold" fill="#1f2933">How the types play together</text>
+  <text x="500" y="72" text-anchor="middle" font-size="15" fill="#6b7480">relations turn questions into arithmetic — effects say what may be done, and by whom</text>
+
+  <!-- ============ edges (drawn first, nodes sit on top) ============ -->
+  <g stroke="#2f9e6b" stroke-width="2">
+    <line x1="470" y1="200" x2="250" y2="258"/>
+    <line x1="560" y1="200" x2="700" y2="258"/>
+    <line x1="330" y1="304" x2="548" y2="304"/>
+    <line x1="720" y1="352" x2="790" y2="392"/>
+  </g>
+  <g font-size="11" fill="#6b7480" font-style="italic">
+    <text x="330" y="216">has many</text>
+    <text x="606" y="216">has many</text>
+    <text x="400" y="296" text-anchor="middle">billed under</text>
+    <text x="772" y="378">settled by</text>
+  </g>
+
+  <!-- ============ Partner ============ -->
+  <rect x="398" y="108" width="212" height="92" rx="14" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2.5"/>
+  <text x="504" y="134" text-anchor="middle" font-size="15" font-weight="bold" fill="#1f2933">Partner</text>
+  <text x="504" y="152" text-anchor="middle" font-size="10.5" fill="#6b7480">name · customer no. · IBAN</text>
+  <rect x="418" y="164" width="172" height="24" rx="12" fill="#ffffff" stroke="#2f9e6b" stroke-width="1.5"/>
+  <text x="504" y="180" text-anchor="middle" font-size="10.5" fill="#3f6b55">mark as checked</text>
+
+  <!-- ============ Contract ============ -->
+  <rect x="118" y="258" width="212" height="92" rx="14" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2.5"/>
+  <text x="224" y="284" text-anchor="middle" font-size="15" font-weight="bold" fill="#1f2933">Contract</text>
+  <text x="224" y="302" text-anchor="middle" font-size="10.5" fill="#6b7480">notice period · renews on</text>
+  <rect x="138" y="314" width="172" height="24" rx="12" fill="#fdf3e7" stroke="#e08a2b" stroke-width="1.5"/>
+  <path d="M158,321 v-3 a4,4 0 0 1 8,0 v3" fill="none" stroke="#a86518" stroke-width="1.5"/>
+  <rect x="157" y="321" width="10" height="8" rx="2" fill="#a86518"/>
+  <text x="238" y="330" text-anchor="middle" font-size="10.5" fill="#a86518">cancel contract</text>
+
+  <!-- ============ Invoice ============ -->
+  <rect x="548" y="258" width="212" height="92" rx="14" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2.5"/>
+  <text x="654" y="284" text-anchor="middle" font-size="15" font-weight="bold" fill="#1f2933">Invoice</text>
+  <text x="654" y="302" text-anchor="middle" font-size="10.5" fill="#6b7480">amount · due date</text>
+  <rect x="562" y="314" width="94" height="24" rx="12" fill="#ffffff" stroke="#2f9e6b" stroke-width="1.5"/>
+  <text x="609" y="330" text-anchor="middle" font-size="10.5" fill="#3f6b55">send reminder</text>
+  <rect x="664" y="314" width="84" height="24" rx="12" fill="#fdf3e7" stroke="#e08a2b" stroke-width="1.5"/>
+  <path d="M678,321 v-3 a4,4 0 0 1 8,0 v3" fill="none" stroke="#a86518" stroke-width="1.5"/>
+  <rect x="677" y="321" width="10" height="8" rx="2" fill="#a86518"/>
+  <text x="714" y="330" text-anchor="middle" font-size="10.5" fill="#a86518">write off</text>
+
+  <!-- ============ Payment ============ -->
+  <rect x="678" y="392" width="212" height="92" rx="14" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2.5"/>
+  <text x="784" y="418" text-anchor="middle" font-size="15" font-weight="bold" fill="#1f2933">Payment</text>
+  <text x="784" y="436" text-anchor="middle" font-size="10.5" fill="#6b7480">amount · value date</text>
+  <rect x="698" y="448" width="172" height="24" rx="12" fill="#ffffff" stroke="#2f9e6b" stroke-width="1.5"/>
+  <text x="784" y="464" text-anchor="middle" font-size="10.5" fill="#3f6b55">match to invoice</text>
+
+  <!-- ============ the lock legend ============ -->
+  <rect x="118" y="392" width="380" height="66" rx="12" fill="#ffffff" stroke="#d8d3c8" stroke-width="2"/>
+  <path d="M143,417 v-5 a6,6 0 0 1 12,0 v5" fill="none" stroke="#a86518" stroke-width="2"/>
+  <rect x="141" y="417" width="16" height="13" rx="3" fill="#fdf3e7" stroke="#a86518" stroke-width="2"/>
+  <text x="170" y="416" font-size="12" font-weight="bold" fill="#1f2933">the locked ones wait for you</text>
+  <text x="170" y="436" font-size="11" fill="#6b7480">anything that moves money or can't be undone.</text>
+  <text x="170" y="452" font-size="11" fill="#6b7480">The rest the Tribe does on its own, with an audit trail.</text>
+
+  <!-- ============ the question, walked ============ -->
+  <rect x="60" y="502" width="880" height="76" rx="14" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2"/>
+  <text x="84" y="530" font-size="13.5" font-style="italic" fill="#1f2933">“which contracts renew in the next sixty days?”</text>
+  <text x="84" y="556" font-size="12" fill="#3f6b55">walked as Partner › Contract · renews on — three of them, each naming the page it was read from.</text>
+  <text x="916" y="530" text-anchor="end" font-size="11" fill="#6b7480">no model was asked to guess</text>
+</svg>

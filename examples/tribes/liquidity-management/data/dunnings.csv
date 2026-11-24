@@ -1,0 +1,4 @@
+id,invoice_id,partner_id,level,sent_date,amount,status
+DUN-SEED-001,RE-2026-0032,BP-004,1,2026-06-25,7400.00,open
+DUN-SEED-002,RE-2026-0035,BP-001,1,2026-07-13,11500.00,open
+DUN-SEED-003,RE-2026-0036,BP-006,2,2026-07-27,6800.00,escalated
