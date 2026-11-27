@@ -1,0 +1,23 @@
+sequenceDiagram
+    participant Trig as Trigger
+    participant Chief
+    participant Worker
+    participant Judge
+    participant Mem as Memory + Data
+    participant Commons as Fleet commons
+
+    Trig->>Chief: wake (schedule / result / user)
+    Note over Chief,Commons: relevant memory is injected automatically —<br/>the Chief no longer has to remember to ask
+    Mem-->>Chief: prior outcomes for this goal-shape (with their scores)
+    Commons-->>Chief: how OTHER Tribes' runs of this shape scored
+    Chief->>Chief: decide a strategy (reflect before risky moves)
+    Chief->>Worker: dispatch the work
+    Worker-->>Chief: result
+    Chief->>Judge: score against the success criterion
+    Judge-->>Chief: Satisfied / Iterate / NoSignal
+    alt Iterate
+        Chief->>Chief: try a different means
+    else Satisfied
+        Chief->>Mem: append the outcome + its score<br/>(history — never overwritten)
+    end
+    Chief->>Mem: publish results · go back to sleep

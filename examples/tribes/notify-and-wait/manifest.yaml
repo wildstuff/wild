@@ -1,0 +1,15 @@
+# `wild tribe apply <bundle> --as <id>` reads this. Schema:
+# `crates/runtime/wild-tribe-ops/src/bundle.rs::BundleManifest`.
+#
+# ADR-0125 Phase 2 live reference: a folder source whose process pauses on a
+# `notify-operator` step that waits for the operator's answer, then routes the
+# resumed item by its `resolution` field — approved files a record, rejected
+# sends a rejection notice. No worker, no LLM.
+schema_version: "1"
+name: notify-and-wait
+description: >-
+  Expense folder intake that asks the operator for approval and resumes the
+  flow with the chosen disposition — the ADR-0125 Phase 2 reference.
+authoring_method: ddd
+parent_tribe: root
+workers: []

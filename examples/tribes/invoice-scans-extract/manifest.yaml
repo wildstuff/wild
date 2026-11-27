@@ -1,0 +1,25 @@
+# `wild tribe apply <bundle> --as <id>` reads this. Schema:
+# `crates/runtime/wild-tribe-ops/src/bundle.rs::BundleManifest`.
+#
+# Minimal DDD bundle for the document connector: a DOCUMENT source whose default
+# fold becomes [ingest, extract, ingest-candidates]. The `extract` stage is
+# dispatched to the built-in `extract-worker` every tribe is born with, which
+# reads each PDF with the profile's LLM — so this example needs a model
+# configured on the profile.
+schema_version: "1"
+
+name: invoice-scans-extract
+description: >-
+  End-to-end example for the document connector: inbound invoice PDFs are read
+  per file by the built-in extract-worker into `supplier_invoice` records.
+
+parent_tribe: root
+
+authoring_method: ddd
+
+# The worker ships with the product; the manifest declares it so `tribe apply`
+# refuses early, naming it, on a profile that cannot deploy it.
+external_components:
+  - extract-worker
+
+workers: []

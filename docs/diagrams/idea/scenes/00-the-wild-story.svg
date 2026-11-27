@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="620" viewBox="0 0 1000 620" font-family="'Chalkboard SE','Comic Sans MS','Segoe Print',sans-serif">
+  <defs>
+    <marker id="s" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#2f9e6b"/>
+    </marker>
+    <marker id="t" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#c9c3b6"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="620" rx="18" fill="#fbfaf7"/>
+  <text x="500" y="46" text-anchor="middle" font-size="27" font-weight="bold" fill="#1f2933">The Wild story, in one picture</text>
+  <text x="500" y="72" text-anchor="middle" font-size="15" fill="#6b7480">two piles that never met — a Tribe joins them, and what it builds is yours from day one</text>
+
+  <!-- ================= 1 — day one: two piles, one sentence ================= -->
+  <rect x="30" y="100" width="290" height="310" rx="14" fill="#ffffff" stroke="#d8d3c8" stroke-width="2"/>
+  <circle cx="56" cy="126" r="13" fill="#2f9e6b"/>
+  <text x="56" y="131" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">1</text>
+  <rect x="176" y="142" width="128" height="74" rx="12" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2"/>
+  <path d="M198,216 L190,232 L216,216 Z" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2" stroke-linejoin="round"/>
+  <g font-size="12.5" fill="#1f2933">
+    <text x="192" y="166">Watch my folder</text>
+    <text x="192" y="186">and my mailbox —</text>
+    <text x="192" y="206">due dates matter.</text>
+  </g>
+  <g fill="#ffffff" stroke="#5b7c99" stroke-width="2">
+    <rect x="70" y="190" width="80" height="12" rx="4"/>
+    <rect x="80" y="181" width="60" height="12" rx="4"/>
+  </g>
+  <path d="M64,208 h38 l9,-11 h52 a7,7 0 0 1 7,7 v50 a7,7 0 0 1 -7,7 h-99 a7,7 0 0 1 -7,-7 v-50 a7,7 0 0 1 7,-7 z" fill="#eef2f5" stroke="#5b7c99" stroke-width="2"/>
+  <text x="110" y="278" text-anchor="middle" font-size="10.5" fill="#6b7480">the contract lives here</text>
+  <rect x="214" y="238" width="58" height="42" rx="6" fill="#eef2f5" stroke="#5b7c99" stroke-width="2"/>
+  <path d="M214,242 L243,266 L272,242" fill="none" stroke="#5b7c99" stroke-width="2"/>
+  <text x="243" y="296" text-anchor="middle" font-size="10.5" fill="#6b7480">the bill arrives here</text>
+  <circle cx="272" cy="326" r="14" fill="#bfe6d2" stroke="#2f9e6b" stroke-width="2"/>
+  <path d="M254,356 a18,18 0 0 1 36,0" fill="#bfe6d2" stroke="#2f9e6b" stroke-width="2"/>
+  <text x="272" y="374" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#2f9e6b">Elder</text>
+  <text x="52" y="352" font-size="13.5" font-weight="bold" fill="#1f2933">You hand the topic over.</text>
+  <text x="52" y="372" font-size="12" fill="#6b7480">One sentence, in your language —</text>
+  <text x="52" y="390" font-size="12" fill="#6b7480">Elder raises a Tribe for it.</text>
+
+  <path d="M324,244 h20" fill="none" stroke="#2f9e6b" stroke-width="2" marker-end="url(#s)"/>
+
+  <!-- ================= 2 — it joins, then it builds ================= -->
+  <rect x="350" y="100" width="300" height="310" rx="14" fill="#ffffff" stroke="#d8d3c8" stroke-width="2"/>
+  <circle cx="376" cy="126" r="13" fill="#2f9e6b"/>
+  <text x="376" y="131" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">2</text>
+
+  <!-- row A: folder + mail meet in one Partner -->
+  <path d="M380,152 h16 l4,-5 h22 a4,4 0 0 1 4,4 v22 a4,4 0 0 1 -4,4 h-42 a4,4 0 0 1 -4,-4 v-17 a4,4 0 0 1 4,-4 z" fill="#eef2f5" stroke="#5b7c99" stroke-width="1.8"/>
+  <rect x="378" y="192" width="46" height="30" rx="5" fill="#eef2f5" stroke="#5b7c99" stroke-width="1.8"/>
+  <path d="M378,195 L401,213 L424,195" fill="none" stroke="#5b7c99" stroke-width="1.8"/>
+  <rect x="452" y="172" width="76" height="26" rx="10" fill="#edf7f1" stroke="#2f9e6b" stroke-width="2.2"/>
+  <text x="490" y="190" text-anchor="middle" font-size="12" font-weight="bold" fill="#1f2933">Partner</text>
+  <g fill="none" stroke="#2f9e6b" stroke-width="1.8" marker-end="url(#s)">
+    <path d="M430,164 C442,168 442,176 446,180"/>
+    <path d="M430,206 C442,202 442,194 446,190"/>
+  </g>
+  <text x="544" y="180" font-size="12" fill="#1f2933">the mailed bill finds</text>
+  <text x="544" y="198" font-size="12" fill="#1f2933">the folder's contract</text>
+  <rect x="452" y="208" width="128" height="24" rx="12" fill="#ffffff" stroke="#2f9e6b" stroke-width="1.8"/>
+  <line x1="464" y1="214" x2="464" y2="227" stroke="#2f9e6b" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M464,214 l11,3.5 l-11,3.5 z" fill="#2f9e6b"/>
+  <text x="482" y="225" font-size="11" font-weight="bold" fill="#2f9e6b">due date flagged</text>
+
+  <!-- row B: the forge -->
+  <path d="M392,258 h48 l-7,11 h-34 z" fill="#9aa4af" stroke="#1f2933" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M404,269 h24 v8 l8,13 h-40 l8,-13 z" fill="#9aa4af" stroke="#1f2933" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#e08a2b" stroke-width="2.2" stroke-linecap="round">
+    <line x1="416" y1="246" x2="416" y2="238"/>
+    <line x1="400" y1="250" x2="394" y2="243"/>
+    <line x1="432" y1="250" x2="438" y2="243"/>
+  </g>
+  <text x="466" y="270" font-size="12.5" fill="#1f2933">the tools it was missing</text>
+
+  <!-- row C: the apps -->
+  <rect x="398" y="300" width="36" height="56" rx="8" fill="#ffffff" stroke="#1f2933" stroke-width="2.2"/>
+  <rect x="403" y="308" width="26" height="36" rx="4" fill="#edf7f1" stroke="#2f9e6b" stroke-width="1.4"/>
+  <circle cx="416" cy="350" r="3" fill="#1f2933"/>
+  <text x="466" y="332" font-size="12.5" fill="#1f2933">apps for your people</text>
+
+  <text x="372" y="378" font-size="13.5" font-weight="bold" fill="#1f2933">It joins what belongs together</text>
+  <text x="372" y="396" font-size="13.5" font-weight="bold" fill="#1f2933">— then it builds on that.</text>
+
+  <path d="M654,244 h20" fill="none" stroke="#2f9e6b" stroke-width="2" marker-end="url(#s)"/>
+
+  <!-- ================= 3 — what stays, growing daily ================= -->
+  <rect x="680" y="100" width="290" height="310" rx="14" fill="#ffffff" stroke="#d8d3c8" stroke-width="2"/>
+  <circle cx="706" cy="126" r="13" fill="#2f9e6b"/>
+  <text x="706" y="131" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">3</text>
+
+  <rect x="762" y="166" width="150" height="30" rx="15" fill="#2f9e6b"/>
+  <text x="837" y="186" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#ffffff">yours — all of it</text>
+
+  <!-- shelf -->
+  <line x1="708" y1="300" x2="942" y2="300" stroke="#b08d57" stroke-width="3.5" stroke-linecap="round"/>
+  <!-- model chip -->
+  <rect x="714" y="252" width="64" height="46" rx="9" fill="#ffffff" stroke="#2f9e6b" stroke-width="2"/>
+  <g stroke="#2f9e6b" stroke-width="1.4">
+    <line x1="746" y1="266" x2="732" y2="284"/>
+    <line x1="746" y1="266" x2="760" y2="284"/>
+  </g>
+  <g fill="#bfe6d2" stroke="#2f9e6b" stroke-width="1.4">
+    <circle cx="746" cy="265" r="5.5"/>
+    <circle cx="732" cy="285" r="5.5"/>
+    <circle cx="760" cy="285" r="5.5"/>
+  </g>
+  <!-- tool chip -->
+  <rect x="794" y="252" width="64" height="46" rx="9" fill="#ffffff" stroke="#e08a2b" stroke-width="2"/>
+  <text x="826" y="280" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#1f2933">parser</text>
+  <text x="852" y="264" text-anchor="middle" font-size="11" fill="#e08a2b">✦</text>
+  <!-- app phone -->
+  <rect x="880" y="240" width="40" height="58" rx="8" fill="#ffffff" stroke="#1f2933" stroke-width="2.2"/>
+  <rect x="886" y="248" width="28" height="38" rx="4" fill="#edf7f1" stroke="#2f9e6b" stroke-width="1.4"/>
+  <g fill="#bfe6d2">
+    <rect x="890" y="253" width="20" height="5" rx="2.5"/>
+    <rect x="890" y="263" width="20" height="5" rx="2.5"/>
+    <rect x="890" y="273" width="20" height="5" rx="2.5"/>
+  </g>
+  <g font-size="10.5" fill="#6b7480" text-anchor="middle">
+    <text x="746" y="320">model</text>
+    <text x="826" y="320">tool</text>
+    <text x="900" y="320">app</text>
+  </g>
+
+  <text x="702" y="352" font-size="13.5" font-weight="bold" fill="#1f2933">Everything it builds stays.</text>
+  <text x="702" y="372" font-size="12" fill="#6b7480">There from day one, richer every</text>
+  <text x="702" y="390" font-size="12" fill="#6b7480">day — on your machine, yours.</text>
+
+  <!-- timeline -->
+  <path d="M60,432 H924" fill="none" stroke="#c9c3b6" stroke-width="1.5" marker-end="url(#t)"/>
+  <text x="60" y="452" font-size="11.5" font-style="italic" fill="#6b7480">day one</text>
+  <text x="930" y="452" text-anchor="end" font-size="11.5" font-style="italic" fill="#6b7480">and every day after — it keeps growing</text>
+
+  <!-- ================= the other way ================= -->
+  <rect x="30" y="466" width="940" height="76" rx="14" fill="#eef2f5" stroke="#5b7c99" stroke-width="2"/>
+  <text x="56" y="496" font-size="13" font-weight="bold" fill="#1f2933">The other way — point a model at both piles, every time you ask:</text>
+  <text x="56" y="518" font-size="12" fill="#5b7c99">every question re-reads your files, every answer evaporates the moment it's given.</text>
+  <path d="M872,476 h52 v48 l-8,-6 -9,6 -9,-6 -9,6 -9,-6 -8,6 z" fill="#ffffff" stroke="#5b7c99" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#9aa4af" stroke-width="1.6">
+    <line x1="880" y1="488" x2="916" y2="488"/>
+    <line x1="880" y1="498" x2="916" y2="498"/>
+    <line x1="880" y1="508" x2="904" y2="508"/>
+  </g>
+  <text x="860" y="498" text-anchor="end" font-size="13" font-weight="bold" fill="#1f2933">nothing kept —</text>
+  <text x="860" y="518" text-anchor="end" font-size="13" font-weight="bold" fill="#1f2933">just the bill.</text>
+
+  <text x="500" y="584" text-anchor="middle" font-size="13" font-style="italic" fill="#1f2933">AI that builds, not burns — every answer adds to something you own; prompting leaves nothing behind.</text>
+</svg>

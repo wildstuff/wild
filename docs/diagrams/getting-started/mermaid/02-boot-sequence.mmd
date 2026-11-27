@@ -1,0 +1,9 @@
+flowchart TD
+    Up["wild up"] --> HD["spawns wild-hostd<br/>(daemon child process)"]
+    HD --> N["✓ NATS supervised<br/>(or external via WILD_NATS_URL)"]
+    N --> J["✓ JetStream up"]
+    J --> DB["✓ tribes.db migrated"]
+    DB --> H["✓ embedded host ready"]
+    H --> C["✓ default Chief registered"]
+    C --> P["✓ workers pulled<br/>(first run only)"]
+    P --> R["wild-hostd ready ·<br/>Ctrl-C drains it"]

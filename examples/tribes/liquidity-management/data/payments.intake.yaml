@@ -1,0 +1,12 @@
+# Intake mapping for the payments seed.
+# `payment` is key_strategy: uuid (autokey), the same shape as
+# `payment_promise`: the seed rows carry an explicit `id` (promoted on Upsert)
+# so the money verbs have stable targets to be invoked against, while a
+# `schedule_payment` at runtime omits the id and the store mints one.
+#
+# No `status` column: only the payment's commands move it (ADR-0370), so
+# every seeded payment starts `planned` and `approve_payment` → `pay_invoice`
+# walk it from there. Only the open payables carry a seeded payment.
+target_type: payment
+key: [id]
+columns: [id, invoice_id, partner_id, account_iban, amount, scheduled_date, method]

@@ -1,0 +1,10 @@
+{
+  "tool": "extract_domain",
+  "input": {
+    "url": "https://www.example.com/article/123?q=1"
+  },
+  "expected": {
+    "domain": "example.com"
+  },
+  "match": "exact"
+}
